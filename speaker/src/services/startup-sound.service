@@ -1,0 +1,11 @@
+[Unit]
+Description=Play Startup Sound on Boot
+After=sound.target alsa-restore.service
+Wants=sound.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/aplay -D default __STARTUP_WAV_PATH__
+
+[Install]
+WantedBy=multi-user.target

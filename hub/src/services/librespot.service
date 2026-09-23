@@ -1,0 +1,13 @@
+[Unit]
+Description=Librespot Spotify Connect Client
+After=network.target
+
+[Service]
+Type=simple
+User=snapserver
+ExecStart=/usr/bin/librespot --name "HSS Spotify" --backend pipe --device /tmp/spotifyfifo --bitrate 320 --initial-volume 100
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,33 @@
+[Unit]
+Description=Snapcast Client
+After=network-online.target sound.target alsa-restore.service
+Wants=network-online.target sound.target
+
+[Service]
+Type=simple
+User=__RUN_USER__
+Group=audio
+
+ExecStartPre=-/usr/bin/amixer -c __AUDIO_CARD_NAME__ sset Speaker 0%
+ExecStart=/usr/bin/snapclient \
+  --host __SNAPSERVER_HOST__ \
+  --port __SNAPSERVER_PORT__ \
+  --player alsa \
+  --soundcard __SNAPCLIENT_SOUNDCARD__ \
+  --buffer __BUFFER_MS__
+
+ExecStartPost=/bin/sleep 0.5
+ExecStartPost=-/usr/bin/amixer -c __AUDIO_CARD_NAME__ sset Speaker __TARGET_VOLUME__
+
+Restart=always
+RestartSec=3
+
+Nice=-10
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=85
+
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

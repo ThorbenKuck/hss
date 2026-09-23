@@ -1,0 +1,12 @@
+[Unit]
+Description=Disable Wi-Fi power save for low latency audio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iw wlan0 set power_save off
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

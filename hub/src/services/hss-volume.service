@@ -1,0 +1,13 @@
+[Unit]
+Description=HSS Potentiometer Snapcast Stream Volume Controller
+After=snapserver.service
+Wants=snapserver.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/hss_volume_control.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

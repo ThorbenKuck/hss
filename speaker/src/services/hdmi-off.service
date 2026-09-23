@@ -1,0 +1,11 @@
+[Unit]
+Description=Disable HDMI output to save power
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/vcgencmd display_power 0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

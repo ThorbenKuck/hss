@@ -1,0 +1,66 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - 'release-*'
+  pull_request:
+    branches: [ "main" ]
+  release:
+    types: [published]
+
+jobs:
+  validate:
+    name: Build and Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Clean build directory
+        run: make clean || true
+
+      - name: Test build Hub target
+        run: go run build.go hub
+
+      - name: Test build Speaker target
+        run: go run build.go speaker
+
+  publish-release:
+    name: Attach Artifacts to Release
+    needs: validate
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Clean build directory
+        run: make clean || true
+
+      - name: Build target setup scripts
+        run: |
+          go run build.go hub
+          go run build.go speaker
+
+      - name: Upload binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            hub/dist/hub_setup.sh
+            speaker/dist/speaker_setup.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

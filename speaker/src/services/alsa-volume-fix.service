@@ -1,0 +1,10 @@
+[Unit]
+Description=Ensure ALSA volume after snapclient initialization
+After=snapclient.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/amixer -c __AUDIO_CARD_NAME__ sset Speaker __TARGET_VOLUME__
+
+[Install]
+WantedBy=multi-user.target
