@@ -46,6 +46,12 @@ else
   SNAPWEB_PORT="1780"
 fi
 
+if ask_yes_no "Install Librespot (Spotify Client)?"; then
+  INSTALL_LIBRESPOT=true
+else
+  INSTALL_LIBRESPOT=false
+fi
+
 if ask_yes_no "Install potentiometer volume control (ADS1015/1115)?"; then
   INSTALL_POTI=true
 else
@@ -152,7 +158,10 @@ if [ "$INSTALL_POTI" = true ]; then
 fi
 
 apt install -y $BASE_PACKAGES
-install_librespot
+
+if [ "$INSTALL_LIBRESPOT" = true ]; then
+  install_librespot
+fi
 if [ "$INSTALL_SNAPWEB" = true ]; then
   install_snapweb
 fi
