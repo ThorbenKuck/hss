@@ -25,7 +25,8 @@ CONFIG_FILE_ENV="/var/local/setup_config.env"
 STARTUP_WAV_PATH="/var/local/startup.wav"
 REPO_DIR="/var/tmp/WM8960-Audio-HAT"
 SCRIPT_PATH=$(realpath "$0")
-RESUME_SERVICE="/etc/systemd/system/snapclient-resume.service"
+RESUME_SCRIPT="/var/local/setup.sh"
+RESUME_HOOK="/etc/profile.d/resume_setup.sh"
 
 # Helper function to ask yes/no questions requiring an explicit answer
 ask_yes_no() {
@@ -86,17 +87,20 @@ get_stage() {
   fi
 }
 
-enable_systemd_resume() {
-  echo "Deploying systemd resume service..."
-  # @embed_file services/snapclient-resume.service "$RESUME_SERVICE"
-  systemctl daemon-reload
-  systemctl enable snapclient-resume.service
+enable_resume_hook() {
+  echo "Deploying setup resume login hook..."
+  mkdir -p "$(dirname "$RESUME_SCRIPT")" "$(dirname "$RESUME_HOOK")"
+  cp "$SCRIPT_PATH" "$RESUME_SCRIPT"
+  chmod 755 "$RESUME_SCRIPT"
+  cat > "$RESUME_HOOK" <<'EOF'
+if [ -f /var/local/setup_progress ]; then
+  /bin/bash /var/local/setup.sh -y
+fi
+EOF
 }
 
-disable_systemd_resume() {
-  systemctl disable snapclient-resume.service 2>/dev/null || true
-  rm -f "$RESUME_SERVICE" "$STATE_FILE" "$CONFIG_FILE_ENV"
-  systemctl daemon-reload
+disable_resume_hook() {
+  rm -f "$RESUME_HOOK" "$RESUME_SCRIPT" "$STATE_FILE" "$CONFIG_FILE_ENV"
 }
 
 PRINTLN_COUNTER=1
@@ -354,7 +358,7 @@ EOF
   installWM8960Driver
 
   set_stage "AUDIO_SETUP"
-  enable_systemd_resume
+  enable_resume_hook
 
   echo "=== Initial driver installation complete ==="
   echo "Rebooting now. The setup will automatically continue after boot..."
@@ -430,7 +434,7 @@ audioSetupStage() {
   println "Applying real-time limits"
   applyRealTimeLimits
 
-  disable_systemd_resume
+  disable_resume_hook
 
   echo
   echo "=== SPEAKER SETUP COMPLETE ==="

@@ -188,6 +188,7 @@ func (b *Builder) refactorAndOptimize(content string) string {
 
 	funcHeaderRegex := regexp.MustCompile(`^(?:function\s+)?([a-zA-Z0-9_]+)\s*\(\)\s*\{`)
 	varNameRegex := regexp.MustCompile(`^([A-Z0-9_]+)=([^\n]+)$`)
+	commandSubstitutionRegex := regexp.MustCompile(`=\$\(`)
 
 	inFunction := false
 	currentFuncName := ""
@@ -198,7 +199,6 @@ func (b *Builder) refactorAndOptimize(content string) string {
 		trimmed := strings.TrimSpace(line)
 
 		if strings.HasPrefix(trimmed, "#!") {
-			shebang = trimmed
 			continue
 		}
 
@@ -243,7 +243,7 @@ func (b *Builder) refactorAndOptimize(content string) string {
 			continue
 		}
 
-		if varNameRegex.MatchString(trimmed) && !strings.HasPrefix(line, " ") && trimmed != "STAGE=$(get_stage)" {
+		if varNameRegex.MatchString(trimmed) && !strings.HasPrefix(line, " ") && !commandSubstitutionRegex.MatchString(trimmed) {
 			if !contains(b.globalVars, trimmed) {
 				b.globalVars = append(b.globalVars, trimmed)
 			}
