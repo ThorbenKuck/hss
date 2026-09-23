@@ -1,14 +1,17 @@
-#!/usr/bin/env python3
 import http.server
 import socketserver
 import subprocess
 import urllib.parse
+import time
 
 PORT = 80
 
-
 class WifiPortalHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
+        # Trigger rescan before listing available networks
+        subprocess.run("nmcli dev wifi rescan", shell=True, capture_output=True)
+        time.sleep(1)
+
         cmd = "nmcli -t -f SSID,SIGNAL dev wifi list"
         try:
             output = subprocess.check_output(cmd, shell=True, text=True)
@@ -56,9 +59,13 @@ class WifiPortalHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"<h2>Connecting... Hotspot will turn off shortly.</h2>")
 
-        connect_cmd = f"nmcli dev wifi connect '{ssid}' password '{password}'"
+        # Disconnect hotspot first, connect to home network, set high autoconnect priority
+        connect_cmd = (
+            f"nmcli connection down HSS-Hotspot && "
+            f"nmcli dev wifi connect '{ssid}' password '{password}' name '{ssid}' && "
+            f"nmcli connection modify '{ssid}' connection.autoconnect yes connection.autoconnect-priority 10"
+        )
         subprocess.Popen(connect_cmd, shell=True)
-
 
 if __name__ == "__main__":
     with socketserver.TCPServer(("", PORT), WifiPortalHandler) as httpd:

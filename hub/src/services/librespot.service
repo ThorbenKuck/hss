@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 User=librespot
-ExecStart=/usr/local/bin/librespot --name "HSS Spotify" --backend pipe --device /tmp/spotifyfifo --bitrate 320 --initial-volume 100
+ExecStart=/usr/local/bin/librespot --name "HSS Spotify" --backend pipe --device /run/snapserver/spotify --bitrate 320 --initial-volume 100
 Restart=always
 RestartSec=5
 

@@ -52,6 +52,12 @@ else
   INSTALL_LIBRESPOT=false
 fi
 
+if ask_yes_no "Enable the universal audio pipe?"; then
+  INSTALL_UNIVERSAL=true
+else
+  INSTALL_UNIVERSAL=false
+fi
+
 if ask_yes_no "Install potentiometer volume control (ADS1015/1115)?"; then
   INSTALL_POTI=true
 else
@@ -68,50 +74,18 @@ LIBRESPOT_PATH="/usr/local/bin/librespot"
 SNAPWEB_ROOT="/var/www/snapweb"
 
 install_librespot() {
-  echo "Installing the latest Librespot release..."
+  echo "Building Librespot from source..."
 
-  local architecture asset_url release_json
-  case "$(uname -m)" in
-    aarch64) architecture="aarch64|arm64" ;;
-    armv7l|armv7) architecture="armv7|armhf|arm-unknown" ;;
-    armv6l|armv6) architecture="armv6|arm-unknown" ;;
-    x86_64) architecture="x86_64" ;;
-    *)
-      echo "Error: Unsupported CPU architecture for Librespot: $(uname -m)" >&2
-      exit 1
-      ;;
-  esac
+  apt install -y build-essential pkg-config libasound2-dev
 
-  release_json=$(mktemp)
-  trap 'rm -f "$release_json"' RETURN
-  curl --fail --silent --show-error --location \
-    https://api.github.com/repos/librespot-org/librespot/releases/latest \
-    -o "$release_json"
-
-  asset_url=$(python3 - "$release_json" "$architecture" <<'PY'
-import json
-import re
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as release_file:
-    release = json.load(release_file)
-
-architecture_patterns = sys.argv[2].split("|")
-for asset in release.get("assets", []):
-    name = asset.get("name", "").lower()
-    if any(re.search(pattern, name) for pattern in architecture_patterns) and ("linux" in name or "gnu" in name):
-        print(asset["browser_download_url"])
-        break
-PY
-)
-
-  if [ -z "$asset_url" ]; then
-    echo "Error: The latest Librespot release has no pre-compiled Linux ${architecture} binary." >&2
-    echo "       Check https://github.com/librespot-org/librespot/releases for a compatible release asset." >&2
-    exit 1
+  if ! command -v cargo >/dev/null 2>&1 || [ ! -f "$HOME/.cargo/env" ]; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   fi
 
-  curl --fail --silent --show-error --location "$asset_url" -o "$LIBRESPOT_PATH"
+  # shellcheck disable=SC1090
+  source "$HOME/.cargo/env"
+  cargo install librespot
+  mv "$HOME/.cargo/bin/librespot" "$LIBRESPOT_PATH"
   chmod 755 "$LIBRESPOT_PATH"
   if ! id librespot >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/librespot --create-home --shell /usr/sbin/nologin librespot
@@ -234,11 +208,34 @@ if [ "$INSTALL_POTI" = true ]; then
 fi
 
 # 4. Configure Audio Sources and Snapserver
-echo "[4/7] Setting up AirPlay, Spotify audio pipes and Snapserver configuration..."
-mkdir -p /tmp/snapfifo
-mkfifo /tmp/airplayfifo 2>/dev/null || true
-mkfifo /tmp/spotifyfifo 2>/dev/null || true
-chmod 666 /tmp/airplayfifo /tmp/spotifyfifo
+echo "[4/7] Setting up audio pipes and Snapserver configuration..."
+SNAPSERVER_RUNTIME_DIR="/run/snapserver"
+MASTER_FIFO="$SNAPSERVER_RUNTIME_DIR/master"
+AIRPLAY_FIFO="$SNAPSERVER_RUNTIME_DIR/airplay"
+SPOTIFY_FIFO="$SNAPSERVER_RUNTIME_DIR/spotify"
+UNIVERSAL_FIFO="$SNAPSERVER_RUNTIME_DIR/universal"
+
+mkdir -p "$SNAPSERVER_RUNTIME_DIR"
+chmod 777 "$SNAPSERVER_RUNTIME_DIR"
+mkfifo "$MASTER_FIFO" 2>/dev/null || true
+chmod 666 "$MASTER_FIFO"
+
+if [ "$INSTALL_LIBRESPOT" = true ]; then
+  mkfifo "$SPOTIFY_FIFO" 2>/dev/null || true
+  chmod 666 "$SPOTIFY_FIFO"
+else
+  rm -f "$SPOTIFY_FIFO"
+fi
+
+if [ "$INSTALL_UNIVERSAL" = true ]; then
+  mkfifo "$UNIVERSAL_FIFO" 2>/dev/null || true
+  chmod 666 "$UNIVERSAL_FIFO"
+else
+  rm -f "$UNIVERSAL_FIFO"
+fi
+
+mkfifo "$AIRPLAY_FIFO" 2>/dev/null || true
+chmod 666 "$AIRPLAY_FIFO"
 
 # Configure Shairport-Sync (AirPlay)
 cat > /etc/shairport-sync.conf <<'EOF'
@@ -252,20 +249,28 @@ sessioncontrol = {
 
 output_backend = "pipe";
 pipe = {
-    path = "/tmp/airplayfifo";
+    path = "/run/snapserver/airplay";
 };
 EOF
 
-# Configure Librespot (Spotify Connect) service
-# @embed_file services/librespot.service /etc/systemd/system/librespot.service
+if [ "$INSTALL_LIBRESPOT" = true ]; then
+  # Configure Librespot (Spotify Connect) service
+  :
+  # @embed_file services/librespot.service /etc/systemd/system/librespot.service
+else
+  systemctl disable --now librespot 2>/dev/null || true
+  rm -f /etc/systemd/system/librespot.service
+fi
 
 SNAPCONF="/etc/snapserver.conf"
 if [ -f "$SNAPCONF" ]; then
   cp "$SNAPCONF" "${SNAPCONF}.bak"
-  sed -i '/^source = pipe:\/\/\/tmp\/airplayfifo/d' "$SNAPCONF"
-  sed -i '/^source = pipe:\/\/\/tmp\/spotifyfifo/d' "$SNAPCONF"
+  sed -i '/^source = /d' "$SNAPCONF"
+else
+  touch "$SNAPCONF"
+fi
 
-  if [ "$INSTALL_SNAPWEB" = true ]; then
+if [ "$INSTALL_SNAPWEB" = true ]; then
     if grep -q "\[http\]" "$SNAPCONF"; then
       sed -i "/\[http\]/,/\[/ s|^#*doc_root =.*|doc_root = $SNAPWEB_ROOT|" "$SNAPCONF"
       sed -i '/\[http\]/,/\[/ s/^#*enabled =.*/enabled = true/' "$SNAPCONF"
@@ -280,15 +285,37 @@ host = 0.0.0.0
 port = $SNAPWEB_PORT
 EOF
     fi
+fi
+
+{
+  echo
+
+  # Build the meta sources path dynamically
+  META_SOURCES="TCP/Airplay"
+
+  if [ "$INSTALL_LIBRESPOT" = true ]; then
+    META_SOURCES="$META_SOURCES/Spotify"
   fi
 
-  cat >> "$SNAPCONF" <<'EOF'
+  if [ "$INSTALL_UNIVERSAL" = true ]; then
+    META_SOURCES="$META_SOURCES/Universal"
+  fi
 
-# HSS Audio Sources
-source = pipe:///tmp/airplayfifo?name=AirPlay&sampleformat=44100:16:2
-source = pipe:///tmp/spotifyfifo?name=Spotify&sampleformat=44100:16:2
-EOF
-fi
+  # Single Automatic Meta-Stream definition at top priority
+  echo "source = meta:///$META_SOURCES?name=Automatic"
+
+  # Physical audio sources definition
+  echo "source = tcp://0.0.0.0:4953?name=TCP&sampleformat=48000:16:2"
+  echo "source = pipe:///run/snapserver/airplay?name=Airplay&mode=create&sampleformat=44100:16:2"
+
+  if [ "$INSTALL_LIBRESPOT" = true ]; then
+    echo "source = pipe:///run/snapserver/spotify?name=Spotify&mode=create&sampleformat=48000:16:2"
+  fi
+
+  if [ "$INSTALL_UNIVERSAL" = true ]; then
+    echo "source = pipe:///run/snapserver/universal?name=Universal&mode=create&sampleformat=44100:16:2"
+  fi
+} >> "$SNAPCONF"
 
 # 5. NetworkManager Hotspot Fallback & Provisioning Web Portal
 echo "[5/7] Setting up NetworkManager Hotspot and Wi-Fi provisioning portal..."
@@ -297,7 +324,8 @@ nmcli connection modify "HSS-Hotspot" 802-11-wireless.band bg 2>/dev/null || tru
 nmcli connection modify "HSS-Hotspot" 802-11-wireless.channel 6 2>/dev/null || true
 nmcli connection modify "HSS-Hotspot" ipv4.method shared 2>/dev/null || true
 nmcli connection modify "HSS-Hotspot" connection.autoconnect yes 2>/dev/null || true
-nmcli connection modify "HSS-Hotspot" connection.autoconnect-priority 1 2>/dev/null || true
+# Set lower priority so client networks are preferred over hotspot
+nmcli connection modify "HSS-Hotspot" connection.autoconnect-priority -10 2>/dev/null || true
 
 # @embed_file scripts/hss_wifi_portal.py /usr/local/bin/hss_wifi_portal.py
 
@@ -327,7 +355,9 @@ fi
 echo "[7/7] Enabling core services and finalizing installation..."
 systemctl daemon-reload
 systemctl enable --now shairport-sync
-systemctl enable --now librespot
+if [ "$INSTALL_LIBRESPOT" = true ]; then
+  systemctl enable --now librespot
+fi
 systemctl enable --now snapserver.service
 
 echo
