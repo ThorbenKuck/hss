@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"encoding/base64"
 )
 
 const debounceDelay = 5 * time.Second
@@ -243,7 +243,7 @@ func (b *Builder) refactorAndOptimize(content string) string {
 			continue
 		}
 
-		if varNameRegex.MatchString(trimmed) && !strings.HasPrefix(line, " ") {
+		if varNameRegex.MatchString(trimmed) && !strings.HasPrefix(line, " ") && trimmed != "STAGE=$(get_stage)" {
 			if !contains(b.globalVars, trimmed) {
 				b.globalVars = append(b.globalVars, trimmed)
 			}

@@ -282,6 +282,7 @@ setupStartupSound() {
     wget -q -O "$STARTUP_WAV_PATH" "$sound_url"
   fi
   # @embed_file services/startup-sound.service /etc/systemd/system/startup-sound.service
+  sed -i "s|__STARTUP_WAV_PATH__|$STARTUP_WAV_PATH|g" /etc/systemd/system/startup-sound.service
 
   systemctl daemon-reload
   systemctl enable startup-sound.service

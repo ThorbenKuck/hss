@@ -5,7 +5,7 @@ Wants=sound.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/aplay -D default $STARTUP_WAV_PATH
+ExecStart=/usr/bin/aplay -D default __STARTUP_WAV_PATH__
 
 [Install]
 WantedBy=multi-user.target
