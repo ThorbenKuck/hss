@@ -20,6 +20,7 @@ const debounceDelay = 5 * time.Second
 type Builder struct {
 	targetName string
 	srcDir     string
+	sharedDir  string
 	distDir    string
 	outputFile string
 	entryPoint string
@@ -30,6 +31,8 @@ type Builder struct {
 func NewBuilder(target string) (*Builder, error) {
 	targetName := strings.TrimSuffix(target, "/")
 	srcDir := filepath.Join(targetName, "src")
+	projectRoot := filepath.Dir(filepath.Dir(srcDir))
+	sharedDir := filepath.Join(projectRoot, "shared", "src")
 	entryPoint := filepath.Join(srcDir, "main.sh")
 
 	if _, err := os.Stat(entryPoint); os.IsNotExist(err) {
@@ -42,6 +45,7 @@ func NewBuilder(target string) (*Builder, error) {
 	return &Builder{
 		targetName: targetName,
 		srcDir:     srcDir,
+		sharedDir:  sharedDir,
 		distDir:    distDir,
 		outputFile: outputFile,
 		entryPoint: entryPoint,
@@ -125,7 +129,13 @@ func (b *Builder) processIncludes(filePath string) (string, error) {
 		if len(subMatches) < 2 {
 			return match
 		}
-		targetPath := filepath.Join(b.srcDir, strings.TrimSpace(subMatches[1]))
+		relativePath := strings.TrimSpace(subMatches[1])
+		baseDir := b.srcDir
+		if strings.HasPrefix(relativePath, "shared/") {
+			baseDir = b.sharedDir
+			relativePath = strings.TrimPrefix(relativePath, "shared/")
+		}
+		targetPath := filepath.Join(baseDir, relativePath)
 		resolved, err := b.processIncludes(targetPath)
 		if err != nil {
 			fmt.Printf("⚠️ Warning: Failed to include %s: %v\n", targetPath, err)

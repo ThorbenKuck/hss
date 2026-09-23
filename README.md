@@ -26,6 +26,7 @@ Rather than managing massive, monolithic shell scripts, HSS utilizes a custom Go
 Source files in `src/` use special directives to instruct the compiler:
 
 * `# @include modules/<file>.sh` recursively pulls in modular shell code and automatically hoists global environment variables to the top of the final script.
+* `# @include shared/<file>.sh` pulls reusable helpers from the root `shared/src/` directory into the target installer.
 * `# @embed_file <relative_source> <absolute_target>` extracts raw text files (such as systemd services or Python scripts) and wraps them inside protected heredoc blocks in the generated installer.
 
 ### Watch Mode & Automatic Debouncing
@@ -42,6 +43,8 @@ The Go compiler includes a file watcher that monitors the source tree for modifi
 ├── build.go                # Custom Go compiler engine
 ├── go.mod                  # Go module definition
 ├── setup.sh                # Helper script to install Go (via apt or official tarball)
+├── shared/
+│   └── src/                 # Shared shell helpers used by Hub and Speaker
 ├── hub/
 │   ├── dist/               # Compiled output scripts (e.g., hub_setup.sh)
 │   ├── enclosure/          # 3D printed enclosure files

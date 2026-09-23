@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Shared interactive helpers
+# @include shared/ask_yes_no.sh
+# @include shared/ask_value.sh
 # @include modules/systemd.sh
 
 # Parse command line flags
@@ -27,53 +30,6 @@ REPO_DIR="/var/tmp/WM8960-Audio-HAT"
 SCRIPT_PATH=$(realpath "$0")
 RESUME_SCRIPT="/var/local/setup.sh"
 RESUME_HOOK="/etc/profile.d/resume_setup.sh"
-
-# Helper function to ask yes/no questions requiring an explicit answer
-ask_yes_no() {
-  local prompt_text="$1"
-  local default_choice="${2:-Yes}"
-
-  if [ "$ASSUME_YES" = true ]; then
-    return 0
-  fi
-
-  while true; do
-    read -rp "${prompt_text} (type 'yes' to enable, 'no' to skip) [default: ${default_choice}]: " response
-    if [ -z "$response" ]; then
-      response="$default_choice"
-    fi
-
-    case "$response" in
-      [yY]|[yY][eE][sS])
-        return 0
-        ;;
-      [nN][oO])
-        return 1
-        ;;
-      *)
-        echo "Please answer explicitly with 'yes' or 'no'."
-        ;;
-    esac
-  done
-}
-
-# Helper function to prompt for values with a default option
-ask_value() {
-  local prompt_text="$1"
-  local default_value="$2"
-
-  if [ "$ASSUME_YES" = true ]; then
-    echo "$default_value"
-    return
-  fi
-
-  read -rp "${prompt_text} [default: ${default_value}]: " response
-  if [ -z "$response" ]; then
-    echo "$default_value"
-  else
-    echo "$response"
-  fi
-}
 
 set_stage() {
   echo "$1" > "$STATE_FILE"
