@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"encoding/base64"
 )
 
 const debounceDelay = 5 * time.Second
@@ -147,7 +148,6 @@ func (b *Builder) processEmbeds(content string) (string, error) {
 		}
 
 		sourceRelPath := strings.TrimSpace(subMatches[1])
-		// Strip any surrounding single or double quotes from the target path
 		targetPath := strings.Trim(strings.TrimSpace(subMatches[2]), "\"'")
 		fullSourcePath := filepath.Join(b.srcDir, sourceRelPath)
 
@@ -157,8 +157,18 @@ func (b *Builder) processEmbeds(content string) (string, error) {
 			return match
 		}
 
-		placeholder := fmt.Sprintf("# __HEREDOC_START__\ncat > %q <<'EOF'\n%s\nEOF\n# __HEREDOC_END__", targetPath, string(code))
-		return placeholder
+		ext := strings.ToLower(filepath.Ext(fullSourcePath))
+		if ext == ".wav" || ext == ".mp3" || ext == ".bin" {
+			encoded := base64.StdEncoding.EncodeToString(code)
+			return fmt.Sprintf("base64 -d > %q <<'EOF'\n%s\nEOF", targetPath, encoded)
+		}
+
+		textContent := string(code)
+		if !strings.HasSuffix(textContent, "\n") {
+			textContent += "\n"
+		}
+
+		return fmt.Sprintf("cat > %q <<'EOF'\n%sEOF", targetPath, textContent)
 	})
 
 	return result, embedErr

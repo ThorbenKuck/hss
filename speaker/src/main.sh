@@ -270,25 +270,18 @@ setupSnapcastClient() {
   systemctl restart snapclient.service
 }
 
-copyStartupWavFromRepo() {
-  ensure_repo_cloned
-  if [ -f "$REPO_DIR/startup.wav" ]; then
-    cp "$REPO_DIR/startup.wav" "$STARTUP_WAV_PATH"
-  else
-    find "$REPO_DIR" -name "startup.wav" -exec cp {} "$STARTUP_WAV_PATH" \; -quit
-  fi
-
-  if [ ! -f "$STARTUP_WAV_PATH" ]; then
-    echo "ERROR: Could not find startup.wav in $REPO_DIR" >&2
-    exit 1
-  fi
-}
-
 setupStartupSound() {
-  copyStartupWavFromRepo
+  local sound_url="${RELEASE_BASE_URL:-https://github.com/ThorbenKuck/hss/releases/latest/download}/startup.wav"
 
+  echo "Fetching startup sound artifact..."
+  mkdir -p "$(dirname "$STARTUP_WAV_PATH")"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -sSL -o "$STARTUP_WAV_PATH" "$sound_url"
+  else
+    wget -q -O "$STARTUP_WAV_PATH" "$sound_url"
+  fi
   # @embed_file services/startup-sound.service /etc/systemd/system/startup-sound.service
-  sed -i "s|__STARTUP_WAV_PATH__|$STARTUP_WAV_PATH|g" /etc/systemd/system/startup-sound.service
 
   systemctl daemon-reload
   systemctl enable startup-sound.service
