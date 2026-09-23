@@ -45,12 +45,23 @@ get_stage() {
 
 enable_resume_hook() {
   echo "Deploying setup resume login hook..."
+
+  # Ensure directories exist
   mkdir -p "$(dirname "$RESUME_SCRIPT")" "$(dirname "$RESUME_HOOK")"
+
+  # Copy setup script and set executable permissions
   cp "$SCRIPT_PATH" "$RESUME_SCRIPT"
   chmod 755 "$RESUME_SCRIPT"
+
+  # Grant passwordless sudo access for this specific setup script
+  local sudoers_file="/etc/sudoers.d/setup-resume"
+  echo "ALL ALL=(ALL) NOPASSWD: /bin/bash /var/local/setup.sh *" > "$sudoers_file"
+  chmod 0440 "$sudoers_file"
+
+  # Create the login hook script executing via sudo
   cat > "$RESUME_HOOK" <<'EOF'
 if [ -f /var/local/setup_progress ]; then
-  /bin/bash /var/local/setup.sh -y
+  sudo /bin/bash /var/local/setup.sh -y
 fi
 EOF
 }
@@ -281,7 +292,7 @@ startStage() {
   OPT_DISABLE_SWAP=$(ask_yes_no "Disable swap memory to protect the SD card?" "Yes" && echo "true" || echo "false")
   OPT_DISABLE_HDMI=$(ask_yes_no "Disable HDMI output to save power?" "Yes" && echo "true" || echo "false")
   OPT_PERFORMANCE=$(ask_yes_no "Enable performance optimizations (disable Wi-Fi power saving and use the performance CPU governor)?" "Yes" && echo "true" || echo "false")
-  OPT_MONO_OUTPUT=$(ask_yes_no "Configure audio output as a mono downmix?" "Yes" && echo "true" || echo "false")
+  OPT_MONO_OUTPUT=$(ask_yes_no "Configure audio output as a mono downmix?" "No" && echo "true" || echo "false")
   OPT_STARTUP_SOUND=$(ask_yes_no "Play a startup sound when the system boots?" "Yes" && echo "true" || echo "false")
   OPT_ENFORCE_VOLUME=$(ask_yes_no "Enable a service that enforces a startup volume of $TARGET_VOLUME?" "Yes" && echo "true" || echo "false")
 

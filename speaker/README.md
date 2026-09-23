@@ -16,5 +16,5 @@ It brings not too much bass, but enough range to fill the room.
 
 1. install Raspberry Pi OS lite on the MicroSD card
 2. SSH into the speaker
-3. Run `wget https://github.com/ThorbenKuck/hss/releases/latest/download/speaker_setup.sh -O setup.sh`
+3. Run `wget https://github.com/ThorbenKuck/hss/releases/latest/download/speaker_setup.sh -O setup.sh && chmod +x setup.sh && sudo ./setup.sh`
    - Run the script and select your preferences, or run it with `./setup.sh -y` to follow the default settings.
