@@ -72,6 +72,8 @@ POT_SERVICE_PATH="/usr/local/bin/hss_volume_control.py"
 PORTAL_SCRIPT_PATH="/usr/local/bin/hss_wifi_portal.py"
 LIBRESPOT_PATH="/usr/local/bin/librespot"
 SNAPWEB_ROOT="/var/www/snapweb"
+SNAPSERVER_SYSTEMD_DROP_IN_DIR="/etc/systemd/system/snapserver.service.d"
+SNAPSERVER_SYSTEMD_OVERRIDE="${SNAPSERVER_SYSTEMD_DROP_IN_DIR}/override.conf"
 
 install_librespot() {
   echo "Building Librespot from source..."
@@ -139,6 +141,15 @@ fi
 if [ "$INSTALL_SNAPWEB" = true ]; then
   install_snapweb
 fi
+
+mkdir -p "$SNAPSERVER_SYSTEMD_DROP_IN_DIR"
+cat > "$SNAPSERVER_SYSTEMD_OVERRIDE" <<'EOF'
+[Service]
+RuntimeDirectory=snapserver
+RuntimeDirectoryMode=0775
+EOF
+systemctl daemon-reload
+echo "d /run/snapserver 0775 snapserver snapserver -" | sudo tee /etc/tmpfiles.d/snapserver.conf
 
 # 2. Configure Hostname
 echo "[2/7] Setting system hostname to '${NEW_HOSTNAME}'..."
@@ -215,8 +226,8 @@ AIRPLAY_FIFO="$SNAPSERVER_RUNTIME_DIR/airplay"
 SPOTIFY_FIFO="$SNAPSERVER_RUNTIME_DIR/spotify"
 UNIVERSAL_FIFO="$SNAPSERVER_RUNTIME_DIR/universal"
 
-mkdir -p "$SNAPSERVER_RUNTIME_DIR"
-chmod 777 "$SNAPSERVER_RUNTIME_DIR"
+sudo mkdir -p "$SNAPSERVER_RUNTIME_DIR"
+sudo chmod 777 "$SNAPSERVER_RUNTIME_DIR"
 mkfifo "$MASTER_FIFO" 2>/dev/null || true
 chmod 666 "$MASTER_FIFO"
 
@@ -265,7 +276,6 @@ fi
 SNAPCONF="/etc/snapserver.conf"
 if [ -f "$SNAPCONF" ]; then
   cp "$SNAPCONF" "${SNAPCONF}.bak"
-  sed -i '/^source = /d' "$SNAPCONF"
 else
   touch "$SNAPCONF"
 fi
@@ -276,46 +286,50 @@ if [ "$INSTALL_SNAPWEB" = true ]; then
       sed -i '/\[http\]/,/\[/ s/^#*enabled =.*/enabled = true/' "$SNAPCONF"
       sed -i "/\[http\]/,/\[/ s/^#*port =.*/port = $SNAPWEB_PORT/" "$SNAPCONF"
     else
-      cat >> "$SNAPCONF" <<EOF
-
-[http]
-enabled = true
-doc_root = $SNAPWEB_ROOT
-host = 0.0.0.0
-port = $SNAPWEB_PORT
-EOF
+      SNAPCONF_HTTP=$(mktemp)
+      {
+        cat "$SNAPCONF"
+        printf '\n[http]\nenabled = true\ndoc_root = %s\nhost = 0.0.0.0\nport = %s\n' \
+          "$SNAPWEB_ROOT" "$SNAPWEB_PORT"
+      } > "$SNAPCONF_HTTP"
+      mv "$SNAPCONF_HTTP" "$SNAPCONF"
     fi
 fi
 
+# Replace the generated stream section instead of appending duplicate sources.
+SNAPCONF_BASE=$(mktemp)
+awk '
+  /^\[stream\][[:space:]]*$/ { in_stream = 1; next }
+  in_stream && /^\[[^]]+\][[:space:]]*$/ { in_stream = 0 }
+  in_stream { next }
+  /^[[:space:]]*source[[:space:]]*=/ { next }
+  { print }
+' "$SNAPCONF" > "$SNAPCONF_BASE"
+
+# Build the automatic Meta-Stream path from the enabled physical sources.
+META_SOURCES="TCP/Airplay"
+if [ "$INSTALL_LIBRESPOT" = true ]; then
+  META_SOURCES="$META_SOURCES/Spotify"
+fi
+if [ "$INSTALL_UNIVERSAL" = true ]; then
+  META_SOURCES="$META_SOURCES/Universal"
+fi
+
 {
-  echo
-
-  # Build the meta sources path dynamically
-  META_SOURCES="TCP/Airplay"
+  printf '\n[stream]\n'
+  printf 'source = meta:///%s?name=Automatic\n' "$META_SOURCES"
+  printf 'source = tcp://0.0.0.0:4953?name=TCP&sampleformat=48000:16:2\n'
+  printf 'source = pipe:///run/snapserver/airplay?name=Airplay&mode=create&sampleformat=44100:16:2\n'
 
   if [ "$INSTALL_LIBRESPOT" = true ]; then
-    META_SOURCES="$META_SOURCES/Spotify"
+    printf 'source = pipe:///run/snapserver/spotify?name=Spotify&mode=create&sampleformat=48000:16:2\n'
   fi
 
   if [ "$INSTALL_UNIVERSAL" = true ]; then
-    META_SOURCES="$META_SOURCES/Universal"
+    printf 'source = pipe:///run/snapserver/universal?name=Universal&mode=create&sampleformat=44100:16:2\n'
   fi
-
-  # Single Automatic Meta-Stream definition at top priority
-  echo "source = meta:///$META_SOURCES?name=Automatic"
-
-  # Physical audio sources definition
-  echo "source = tcp://0.0.0.0:4953?name=TCP&sampleformat=48000:16:2"
-  echo "source = pipe:///run/snapserver/airplay?name=Airplay&mode=create&sampleformat=44100:16:2"
-
-  if [ "$INSTALL_LIBRESPOT" = true ]; then
-    echo "source = pipe:///run/snapserver/spotify?name=Spotify&mode=create&sampleformat=48000:16:2"
-  fi
-
-  if [ "$INSTALL_UNIVERSAL" = true ]; then
-    echo "source = pipe:///run/snapserver/universal?name=Universal&mode=create&sampleformat=44100:16:2"
-  fi
-} >> "$SNAPCONF"
+} >> "$SNAPCONF_BASE"
+mv "$SNAPCONF_BASE" "$SNAPCONF"
 
 # 5. NetworkManager Hotspot Fallback & Provisioning Web Portal
 echo "[5/7] Setting up NetworkManager Hotspot and Wi-Fi provisioning portal..."
