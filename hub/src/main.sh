@@ -408,6 +408,7 @@ fi
 
 # 7. Enable Services & Finalize
 echo "[7/7] Enabling core services and finalizing installation..."
+chmod 0644 /etc/snapserver.conf /etc/default/snapserver
 systemctl daemon-reload
 systemctl enable --now shairport-sync
 systemctl enable --now snapserver.service
