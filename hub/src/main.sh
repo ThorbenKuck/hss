@@ -32,27 +32,25 @@ NEW_HOSTNAME=$(ask_value "Enter the desired hostname" "hss")
 HOTSPOT_SSID=$(ask_value "Enter the SSID for the setup hotspot" "HSS-Setup")
 
 echo
-if ask_yes_no "Install CPU optimizations and power-saving measures?"; then
+if ask_yes_no "Install CPU optimizations and power-saving measures?" "Yes"; then
   INSTALL_CPU_OPT=true
 else
   INSTALL_CPU_OPT=false
 fi
 
-if ask_yes_no "Install the Snapweb web interface?"; then
+if ask_yes_no "Install the Snapweb web interface?" "Yes"; then
   INSTALL_SNAPWEB=true
-  SNAPWEB_PORT=$(ask_value "Enter the port for the Snapweb interface" "1780")
 else
   INSTALL_SNAPWEB=false
-  SNAPWEB_PORT="1780"
 fi
 
-if ask_yes_no "Install Raspotify (Spotify Client)?"; then
+if ask_yes_no "Install Raspotify (Spotify Client)?" "Yes"; then
   INSTALL_RASPOTIFY=true
 else
   INSTALL_RASPOTIFY=false
 fi
 
-if ask_yes_no "Install HSS-Control? [y/N]" "Yes"; then
+if ask_yes_no "Install HSS-Control?" "Yes"; then
   INSTALL_CONTROL=true
 else
   INSTALL_CONTROL=false
@@ -64,7 +62,7 @@ else
   INSTALL_UNIVERSAL=false
 fi
 
-if ask_yes_no "Would you like to setup the volume control display? [y/N]" "Yes"; then
+if ask_yes_no "Would you like to setup the volume control display?" "Yes"; then
   INSTALL_DISPLAY=true
 else
   INSTALL_DISPLAY=false
@@ -131,10 +129,12 @@ install_snapweb() {
 }
 
 install_hss_control() {
-  echo "Installing HSS Control PWA..."
-  # @embed_file scripts/update_hss_control.sh /usr/local/bin/update_hss_control.sh
-  chmod 755 "$HSS_CONTROL_UPDATER"
-  "$HSS_CONTROL_UPDATER"
+  if [ "$INSTALL_CONTROL" = true ]; then
+    echo "Installing HSS Control PWA..."
+    # @embed_file scripts/update_hss_control.sh /usr/local/bin/update_hss_control.sh
+    chmod 755 "$HSS_CONTROL_UPDATER"
+    "$HSS_CONTROL_UPDATER"
+  fi
 
   # @embed_file config/hss-control.nginx /etc/nginx/sites-available/hss-control
   ln -sfn "$HSS_CONTROL_NGINX_CONF" /etc/nginx/sites-enabled/hss-control
@@ -161,9 +161,7 @@ fi
 if [ "$INSTALL_SNAPWEB" = true ]; then
   install_snapweb
 fi
-if [ "$INSTALL_CONTROL" = true ]; then
-  install_hss_control
-fi
+install_hss_control
 
 mkdir -p "$SNAPSERVER_SYSTEMD_DROP_IN_DIR"
 cat > "$SNAPSERVER_SYSTEMD_OVERRIDE" <<'EOF'
@@ -307,20 +305,9 @@ else
   touch "$SNAPCONF"
 fi
 
-if [ "$INSTALL_SNAPWEB" = true ]; then
-    if grep -q "\[http\]" "$SNAPCONF"; then
-      sed -i "/\[http\]/,/\[/ s|^#*doc_root =.*|doc_root = $SNAPWEB_ROOT|" "$SNAPCONF"
-      sed -i '/\[http\]/,/\[/ s/^#*enabled =.*/enabled = true/' "$SNAPCONF"
-      sed -i "/\[http\]/,/\[/ s/^#*port =.*/port = $SNAPWEB_PORT/" "$SNAPCONF"
-    else
-      SNAPCONF_HTTP=$(mktemp)
-      {
-        cat "$SNAPCONF"
-        printf '\n[http]\nenabled = true\ndoc_root = %s\nhost = 0.0.0.0\nport = %s\n' \
-          "$SNAPWEB_ROOT" "$SNAPWEB_PORT"
-      } > "$SNAPCONF_HTTP"
-      mv "$SNAPCONF_HTTP" "$SNAPCONF"
-    fi
+if grep -q "\[http\]" "$SNAPCONF"; then
+  # Nginx is the only HTTP listener; Snapcast remains the JSON-RPC backend.
+  sed -i "/\[http\]/,/\[/ s/^#*enabled =.*/enabled = false/" "$SNAPCONF"
 fi
 
 # Replace the generated stream section instead of appending duplicate sources.
@@ -375,7 +362,7 @@ chmod +x "$PORTAL_SCRIPT_PATH"
 # @embed_file services/hss-wifi-portal.service /etc/systemd/system/hss-wifi-portal.service
 
 systemctl daemon-reload
-systemctl enable hss-wifi-portal.service
+systemctl enable --now nginx.service hss-wifi-portal.service
 
 # 6. Potentiometer Control Script (Optional)
 if [ "$INSTALL_DISPLAY" = true ]; then
@@ -418,6 +405,6 @@ fi
 echo
 echo "=== HSS HUB SETUP COMPLETE ==="
 if [ "$INSTALL_SNAPWEB" = true ]; then
-  echo "Snapweb is available at http://${NEW_HOSTNAME}.local:${SNAPWEB_PORT}"
+  echo "Snapweb is available at http://${NEW_HOSTNAME}.local/snapweb/"
 fi
 echo "Please reboot your Raspberry Pi to ensure all configurations and hardware overlays take effect."

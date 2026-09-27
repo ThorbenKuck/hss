@@ -3,8 +3,10 @@ server {
     listen [::]:80;
     server_name hss.local;
 
-    location = /control { return 301 /control/; }
-    location /control/ws {
+    root /var/www/hss-control;
+
+    location = /control { return 301 /; }
+    location ^~ /control/ws {
         proxy_pass http://127.0.0.1:1780/jsonrpc;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -13,9 +15,40 @@ server {
         proxy_read_timeout 1h;
     }
 
-    location /control/ {
-        alias /var/www/hss-control/;
-        try_files $uri $uri/ /control/index.html;
+    location ^~ /snapws {
+        proxy_pass http://127.0.0.1:1780/jsonrpc;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 1h;
+    }
+
+    location = /jsonrpc {
+        proxy_pass http://127.0.0.1:1780/jsonrpc;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 1h;
+    }
+
+    location = /setup { return 301 /setup/; }
+    location ^~ /setup/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /snapweb { return 301 /snapweb/; }
+    location ^~ /snapweb/ {
+        alias /var/www/snapweb/;
+        try_files $uri $uri/ /snapweb/index.html;
         add_header Cache-Control "no-cache";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
     }
 }

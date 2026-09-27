@@ -3,21 +3,15 @@ ask_yes_no() {
   local prompt_text="$1"
   local default_choice="${2:-Yes}"
 
-  if [ "$ASSUME_YES" = true ]; then
-    return 0
-  fi
+  [ "${ASSUME_YES:-false}" = true ] && return 0
 
   while true; do
-    read -rp "${prompt_text} (type 'yes' to enable, 'no' to skip) [default: ${default_choice}]: " response
-    if [ -z "$response" ]; then
-      response="$default_choice"
-    fi
-
-    case "$response" in
-      [yY]|[yY][eE][sS])
+    read -rp "${prompt_text} [y/N] [default: ${default_choice}]: " response
+    case "${response:-$default_choice}" in
+      [yY]*)
         return 0
         ;;
-      [nN][oO])
+      [nN]*)
         return 1
         ;;
       *)

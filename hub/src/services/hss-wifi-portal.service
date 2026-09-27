@@ -1,11 +1,17 @@
 [Unit]
 Description=HSS Wi-Fi Provisioning Portal
-After=NetworkManager.service
+After=NetworkManager.service nginx.service
+Wants=NetworkManager.service
+BindsTo=NetworkManager.service
+Conflicts=shutdown.target
 
 [Service]
 Type=simple
+Environment=HSS_WIFI_PORTAL_HOST=127.0.0.1
+Environment=HSS_WIFI_PORTAL_PORT=8080
 ExecStart=/usr/bin/python3 /usr/local/bin/hss_wifi_portal.py
 Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
