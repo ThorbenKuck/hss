@@ -1,21 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
-REPOSITORY="${HSS_REPOSITORY:-thorben/hss}"
+REPOSITORY="${HSS_REPOSITORY:-ThorbenKuck/hss}"
 INSTALL_ROOT="${HSS_CONTROL_ROOT:-/var/www/hss-control}"
-API_URL="https://api.github.com/repos/${REPOSITORY}/releases/latest"
-ARCHIVE_URL=$(curl --fail --silent --show-error --location "$API_URL" |
-  sed -n 's/.*"browser_download_url":[[:space:]]*"\([^"]*hss-control\.tar\.gz\)".*/\1/p' | head -n 1)
-
-if [ -z "$ARCHIVE_URL" ]; then
-  echo "No hss-control.tar.gz asset found in the latest ${REPOSITORY} release." >&2
-  exit 1
-fi
+DOWNLOAD_URL="https://github.com/${REPOSITORY}/releases/latest/download/hss-control.tar.gz"
 
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 archive="$work_dir/hss-control.tar.gz"
-curl --fail --silent --show-error --location "$ARCHIVE_URL" -o "$archive"
+
+echo "Fetching hss-control artifact from ${DOWNLOAD_URL}..."
+curl --fail --silent --show-error --location "$DOWNLOAD_URL" -o "$archive"
+
 mkdir "$work_dir/content"
 tar -xzf "$archive" -C "$work_dir/content"
 test -f "$work_dir/content/index.html"

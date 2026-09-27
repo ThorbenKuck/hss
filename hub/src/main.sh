@@ -52,13 +52,19 @@ else
   INSTALL_RASPOTIFY=false
 fi
 
-if ask_yes_no "Enable the universal audio pipe?"; then
+if ask_yes_no "Install HSS-Control? [y/N]" "Yes"; then
+  INSTALL_CONTROL=true
+else
+  INSTALL_CONTROL=false
+fi
+
+if ask_yes_no "Enable the universal audio pipe?" "Yes"; then
   INSTALL_UNIVERSAL=true
 else
   INSTALL_UNIVERSAL=false
 fi
 
-if ask_yes_no "Would you like to setup the volume control display? [y/N]" "No"; then
+if ask_yes_no "Would you like to setup the volume control display? [y/N]" "Yes"; then
   INSTALL_DISPLAY=true
 else
   INSTALL_DISPLAY=false
@@ -155,7 +161,9 @@ fi
 if [ "$INSTALL_SNAPWEB" = true ]; then
   install_snapweb
 fi
-install_hss_control
+if [ "$INSTALL_CONTROL" = true ]; then
+  install_hss_control
+fi
 
 mkdir -p "$SNAPSERVER_SYSTEMD_DROP_IN_DIR"
 cat > "$SNAPSERVER_SYSTEMD_OVERRIDE" <<'EOF'
