@@ -58,17 +58,20 @@ else
   INSTALL_UNIVERSAL=false
 fi
 
-if ask_yes_no "Install potentiometer volume control (ADS1015/1115)?"; then
-  INSTALL_POTI=true
+if ask_yes_no "Would you like to setup the volume control display? [y/N]" "No"; then
+  INSTALL_DISPLAY=true
 else
-  INSTALL_POTI=false
+  INSTALL_DISPLAY=false
 fi
 
 echo
 echo "=== Starting installation with your configuration ==="
 echo
 
-POT_SERVICE_PATH="/usr/local/bin/hss_volume_control.py"
+VOLUME_CONTROL_PATH="/opt/hss_volume_control.py"
+BOOT_ANIMATION_PATH="/opt/hss_boot_animation.py"
+DISPLAY_VENV="/opt/hss_display_venv"
+DISPLAY_OWNER="${SUDO_USER:-root}"
 PORTAL_SCRIPT_PATH="/usr/local/bin/hss_wifi_portal.py"
 LIBRESPOT_PATH="/usr/local/bin/librespot"
 SNAPWEB_ROOT="/var/www/snapweb"
@@ -146,7 +149,7 @@ echo "[1/7] Updating system and installing base packages..."
 apt update && apt upgrade -y
 
 BASE_PACKAGES="snapserver avahi-daemon ssh python3 python3-pip git alsa-utils network-manager shairport-sync curl unzip nginx"
-if [ "$INSTALL_POTI" = true ]; then
+if [ "$INSTALL_DISPLAY" = true ]; then
   BASE_PACKAGES="$BASE_PACKAGES i2c-tools"
 fi
 
@@ -223,8 +226,8 @@ else
   echo "[3/7] Skipping CPU and performance optimizations..."
 fi
 
-# Configure hardware overlays for ADC if potentiometer is enabled
-if [ "$INSTALL_POTI" = true ]; then
+# Configure hardware overlays for ADC if the volume control display is enabled
+if [ "$INSTALL_DISPLAY" = true ]; then
   CONFIG_FILE="/boot/firmware/config.txt"
   if [ ! -f "$CONFIG_FILE" ]; then
     CONFIG_FILE="/boot/config.txt"
@@ -369,18 +372,32 @@ systemctl daemon-reload
 systemctl enable hss-wifi-portal.service
 
 # 6. Potentiometer Control Script (Optional)
-if [ "$INSTALL_POTI" = true ]; then
-  echo "[6/7] Deploying potentiometer control script..."
-  # @embed_file scripts/hss_volume_control.py /usr/local/bin/hss_volume_control.py
+if [ "$INSTALL_DISPLAY" = true ]; then
+  echo "[6/7] Deploying volume control display..."
+  apt-get install -y python3-venv python3-dev python3-pip libjpeg-dev zlib1g-dev
 
-  chmod +x "$POT_SERVICE_PATH"
+  if [ ! -d "$DISPLAY_VENV" ]; then
+    python3 -m venv "$DISPLAY_VENV"
+  fi
+  "$DISPLAY_VENV/bin/pip" install --upgrade pip setuptools wheel
+  "$DISPLAY_VENV/bin/pip" install spidev RPi.GPIO Pillow
 
-  # @embed_file services/hss-volume.service /etc/systemd/system/hss-volume.service
+  # @embed_file scripts/hss_volume_control.py /opt/hss_volume_control.py
+  # @embed_file scripts/hss_boot_animation.py /opt/hss_boot_animation.py
+
+  chmod +x "$VOLUME_CONTROL_PATH" "$BOOT_ANIMATION_PATH"
+  chown -R "$DISPLAY_OWNER:$DISPLAY_OWNER" \
+    "$VOLUME_CONTROL_PATH" "$BOOT_ANIMATION_PATH" "$DISPLAY_VENV"
+
+  # @embed_file services/hss-boot-animation.service /etc/systemd/system/hss-boot-animation.service
+  # @embed_file services/hss-volume-control.service /etc/systemd/system/hss-volume-control.service
 
   systemctl daemon-reload
-  systemctl enable --now hss-volume.service
+  systemctl disable --now hss-volume.service 2>/dev/null || true
+  systemctl enable hss-boot-animation.service hss-volume-control.service
 else
-  echo "[6/7] Skipping potentiometer setup..."
+  echo "[6/7] Skipping volume control display setup..."
+  systemctl disable --now hss-boot-animation.service hss-volume-control.service hss-volume.service 2>/dev/null || true
 fi
 
 # 7. Enable Services & Finalize

@@ -1,0 +1,15 @@
+[Unit]
+Description=HSS Display Volume Controller
+After=snapserver.service hss-boot-animation.service
+Wants=snapserver.service
+Conflicts=hss-boot-animation.service
+
+[Service]
+Type=simple
+ExecStart=/opt/hss_display_venv/bin/python /opt/hss_volume_control.py
+WorkingDirectory=/opt
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

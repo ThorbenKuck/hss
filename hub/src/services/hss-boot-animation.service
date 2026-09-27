@@ -1,0 +1,15 @@
+[Unit]
+Description=HSS Early Boot Display Animation
+After=local-fs.target
+Before=multi-user.target
+Conflicts=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/opt/hss_display_venv/bin/python /opt/hss_boot_animation.py
+WorkingDirectory=/opt
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
