@@ -1,6 +1,6 @@
 # HSS — Modular Multi-Room Audio Ecosystem
 
-HSS is an automated, Raspberry Pi-powered multi-room audio architecture designed to deliver synchronized high-fidelity sound distribution across independent speaker nodes. Built on top of proven open-source audio engines like Snapcast, Shairport-Sync, and Librespot, the system transforms single-board computers into intelligent audio hubs and active satellite receivers.
+HSS is an automated, Raspberry Pi-powered multi-room audio architecture designed to deliver synchronized high-fidelity sound distribution across independent speaker nodes. Built on top of proven open-source audio engines like Snapcast, Shairport-Sync, and Raspotify, the system transforms single-board computers into intelligent audio hubs and active satellite receivers.
 
 The project features an automated Go-based build pipeline that compiles modular shell components, systemd unit configurations, and embedded Python scripts into unified, self-contained deployment installers.
 
@@ -12,7 +12,7 @@ The ecosystem is divided into two distinct system roles, each tailored to specif
 
 | Role | Binary Output | Description | Primary Features |
 |---|---|---|---|
-| **Hub** | `hub_setup.sh` | Central Audio Distribution Server | Snapserver, AirPlay 2 (Shairport-Sync), Spotify Connect (Librespot), Wi-Fi Provisioning Portal, ADS1015/1115 Hardware Volume Control |
+| **Hub** | `hub_setup.sh` | Central Audio Distribution Server | Snapserver, AirPlay 2 (Shairport-Sync), Spotify Connect (Raspotify), Wi-Fi Provisioning Portal, ADS1015/1115 Hardware Volume Control |
 | **Speaker** | `speaker_setup.sh` | Synchronized Audio Satellite Node | Snapclient, Systemd Auto-Resume, Optimized ALSA Audio Routing |
 
 ---

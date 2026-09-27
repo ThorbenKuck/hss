@@ -46,10 +46,10 @@ else
   SNAPWEB_PORT="1780"
 fi
 
-if ask_yes_no "Install Librespot (Spotify Client)?"; then
-  INSTALL_LIBRESPOT=true
+if ask_yes_no "Install Raspotify (Spotify Client)?"; then
+  INSTALL_RASPOTIFY=true
 else
-  INSTALL_LIBRESPOT=false
+  INSTALL_RASPOTIFY=false
 fi
 
 if ask_yes_no "Enable the universal audio pipe?"; then
@@ -73,7 +73,6 @@ BOOT_ANIMATION_PATH="/opt/hss_boot_animation.py"
 DISPLAY_VENV="/opt/hss_display_venv"
 DISPLAY_OWNER="${SUDO_USER:-root}"
 PORTAL_SCRIPT_PATH="/usr/local/bin/hss_wifi_portal.py"
-LIBRESPOT_PATH="/usr/local/bin/librespot"
 SNAPWEB_ROOT="/var/www/snapweb"
 HSS_CONTROL_ROOT="/var/www/hss-control"
 HSS_CONTROL_UPDATER="/usr/local/bin/update_hss_control.sh"
@@ -81,24 +80,19 @@ HSS_CONTROL_NGINX_CONF="/etc/nginx/sites-available/hss-control"
 SNAPSERVER_SYSTEMD_DROP_IN_DIR="/etc/systemd/system/snapserver.service.d"
 SNAPSERVER_SYSTEMD_OVERRIDE="${SNAPSERVER_SYSTEMD_DROP_IN_DIR}/override.conf"
 
-install_librespot() {
-  echo "Building Librespot from source..."
+install_raspotify() {
+  echo "Installing Raspotify from the official APT repository..."
 
-  apt install -y build-essential pkg-config libasound2-dev
-
-  if ! command -v cargo >/dev/null 2>&1 || [ ! -f "$HOME/.cargo/env" ]; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  fi
-
-  # shellcheck disable=SC1090
-  source "$HOME/.cargo/env"
-  cargo install librespot
-  mv "$HOME/.cargo/bin/librespot" "$LIBRESPOT_PATH"
-  chmod 755 "$LIBRESPOT_PATH"
-  if ! id librespot >/dev/null 2>&1; then
-    useradd --system --home-dir /var/lib/librespot --create-home --shell /usr/sbin/nologin librespot
-  fi
-  chown librespot:librespot "$LIBRESPOT_PATH"
+  apt-get update
+  apt-get install -y curl apt-transport-https gnupg
+  curl --fail --silent --show-error --location \
+    https://dtcooper.github.io/raspotify/key.asc |
+    gpg --dearmor --yes -o /usr/share/keyrings/raspotify-archive-keyring.gpg
+  printf '%s\n' \
+    'deb [signed-by=/usr/share/keyrings/raspotify-archive-keyring.gpg] https://dtcooper.github.io/raspotify main' \
+    > /etc/apt/sources.list.d/raspotify.list
+  apt-get update
+  apt-get install -y raspotify
 }
 
 install_snapweb() {
@@ -155,8 +149,8 @@ fi
 
 apt install -y $BASE_PACKAGES
 
-if [ "$INSTALL_LIBRESPOT" = true ]; then
-  install_librespot
+if [ "$INSTALL_RASPOTIFY" = true ]; then
+  install_raspotify
 fi
 if [ "$INSTALL_SNAPWEB" = true ]; then
   install_snapweb
@@ -252,7 +246,7 @@ sudo chmod 777 "$SNAPSERVER_RUNTIME_DIR"
 mkfifo "$MASTER_FIFO" 2>/dev/null || true
 chmod 666 "$MASTER_FIFO"
 
-if [ "$INSTALL_LIBRESPOT" = true ]; then
+if [ "$INSTALL_RASPOTIFY" = true ]; then
   mkfifo "$SPOTIFY_FIFO" 2>/dev/null || true
   chmod 666 "$SPOTIFY_FIFO"
 else
@@ -285,13 +279,17 @@ pipe = {
 };
 EOF
 
-if [ "$INSTALL_LIBRESPOT" = true ]; then
-  # Configure Librespot (Spotify Connect) service
-  :
-  # @embed_file services/librespot.service /etc/systemd/system/librespot.service
+if [ "$INSTALL_RASPOTIFY" = true ]; then
+  # Configure Raspotify (Spotify Connect) to write into Snapcast's FIFO.
+  cat > /etc/raspotify/conf <<'EOF'
+LIBRESPOT_BACKEND="pipe"
+LIBRESPOT_DEVICE="/run/snapserver/spotify"
+LIBRESPOT_NAME="HSS Spotify"
+LIBRESPOT_BITRATE="320"
+LIBRESPOT_INITIAL_VOLUME="100"
+EOF
 else
-  systemctl disable --now librespot 2>/dev/null || true
-  rm -f /etc/systemd/system/librespot.service
+  systemctl disable --now raspotify.service 2>/dev/null || true
 fi
 
 SNAPCONF="/etc/snapserver.conf"
@@ -329,7 +327,7 @@ awk '
 
 # Build the automatic Meta-Stream path from the enabled physical sources.
 META_SOURCES="TCP/Airplay"
-if [ "$INSTALL_LIBRESPOT" = true ]; then
+if [ "$INSTALL_RASPOTIFY" = true ]; then
   META_SOURCES="$META_SOURCES/Spotify"
 fi
 if [ "$INSTALL_UNIVERSAL" = true ]; then
@@ -342,7 +340,7 @@ fi
   printf 'source = tcp://0.0.0.0:4953?name=TCP&sampleformat=48000:16:2\n'
   printf 'source = pipe:///run/snapserver/airplay?name=Airplay&mode=create&sampleformat=44100:16:2\n'
 
-  if [ "$INSTALL_LIBRESPOT" = true ]; then
+  if [ "$INSTALL_RASPOTIFY" = true ]; then
     printf 'source = pipe:///run/snapserver/spotify?name=Spotify&mode=create&sampleformat=48000:16:2\n'
   fi
 
@@ -404,10 +402,10 @@ fi
 echo "[7/7] Enabling core services and finalizing installation..."
 systemctl daemon-reload
 systemctl enable --now shairport-sync
-if [ "$INSTALL_LIBRESPOT" = true ]; then
-  systemctl enable --now librespot
-fi
 systemctl enable --now snapserver.service
+if [ "$INSTALL_RASPOTIFY" = true ]; then
+  systemctl enable --now raspotify.service
+fi
 
 echo
 echo "=== HSS HUB SETUP COMPLETE ==="
