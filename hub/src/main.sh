@@ -89,7 +89,7 @@ install_raspotify() {
     https://dtcooper.github.io/raspotify/key.asc |
     gpg --dearmor --yes -o /usr/share/keyrings/raspotify-archive-keyring.gpg
   printf '%s\n' \
-    'deb [signed-by=/usr/share/keyrings/raspotify-archive-keyring.gpg] https://dtcooper.github.io/raspotify main' \
+    'deb [signed-by=/usr/share/keyrings/raspotify-archive-keyring.gpg] https://dtcooper.github.io/raspotify raspotify main' \
     > /etc/apt/sources.list.d/raspotify.list
   apt-get update
   apt-get install -y raspotify
