@@ -1,0 +1,23 @@
+name: Release HSS Control
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Package PWA
+        run: tar -czf hss-control.tar.gz -C hss-control .
+      - name: Attach PWA to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hss-control.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

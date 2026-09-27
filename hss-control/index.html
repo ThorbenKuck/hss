@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101827">
+  <meta name="description" content="HSS Snapcast control">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <title>HSS Control</title>
+</head>
+<body>
+  <header class="app-header">
+    <div><p class="eyebrow">HSS</p><h1>Control</h1></div>
+    <span id="connection" class="status offline">Offline</span>
+  </header>
+  <main>
+    <section class="panel">
+      <div class="section-title"><h2>Clients</h2><button id="refresh" class="icon-button" aria-label="Reconnect">↻</button></div>
+      <div id="clients" class="stack"><p class="empty">Waiting for Snapcast…</p></div>
+    </section>
+    <section class="panel">
+      <div class="section-title"><h2>Groups</h2><button id="new-group" class="button">New group</button></div>
+      <div id="groups" class="stack"></div>
+    </section>
+    <section class="panel">
+      <div class="section-title"><h2>Streams</h2><button id="new-stream" class="button">New stream</button></div>
+      <div id="streams" class="stack"></div>
+    </section>
+  </main>
+  <template id="client-template"><article class="card client-card"><div class="card-heading"><div><strong class="client-name"></strong><small class="client-id"></small></div><span class="client-status"></span></div><label class="volume-label">Volume <output class="volume-value"></output><input class="volume" type="range" min="0" max="100" step="1"></label><button class="mute button secondary"></button></article></template>
+  <script src="app.js"></script>
+</body>
+</html>

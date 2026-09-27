@@ -72,6 +72,9 @@ POT_SERVICE_PATH="/usr/local/bin/hss_volume_control.py"
 PORTAL_SCRIPT_PATH="/usr/local/bin/hss_wifi_portal.py"
 LIBRESPOT_PATH="/usr/local/bin/librespot"
 SNAPWEB_ROOT="/var/www/snapweb"
+HSS_CONTROL_ROOT="/var/www/hss-control"
+HSS_CONTROL_UPDATER="/usr/local/bin/update_hss_control.sh"
+HSS_CONTROL_NGINX_CONF="/etc/nginx/sites-available/hss-control"
 SNAPSERVER_SYSTEMD_DROP_IN_DIR="/etc/systemd/system/snapserver.service.d"
 SNAPSERVER_SYSTEMD_OVERRIDE="${SNAPSERVER_SYSTEMD_DROP_IN_DIR}/override.conf"
 
@@ -124,11 +127,25 @@ install_snapweb() {
   find "$SNAPWEB_ROOT" -type f -exec chmod 644 {} +
 }
 
+install_hss_control() {
+  echo "Installing HSS Control PWA..."
+  # @embed_file scripts/update_hss_control.sh /usr/local/bin/update_hss_control.sh
+  chmod 755 "$HSS_CONTROL_UPDATER"
+  "$HSS_CONTROL_UPDATER"
+
+  # @embed_file config/hss-control.nginx /etc/nginx/sites-available/hss-control
+  ln -sfn "$HSS_CONTROL_NGINX_CONF" /etc/nginx/sites-enabled/hss-control
+  rm -f /etc/nginx/sites-enabled/default
+  nginx -t
+  systemctl enable --now nginx
+  systemctl reload nginx
+}
+
 # 1. Update system and install required base packages
 echo "[1/7] Updating system and installing base packages..."
 apt update && apt upgrade -y
 
-BASE_PACKAGES="snapserver avahi-daemon ssh python3 python3-pip git alsa-utils network-manager shairport-sync curl unzip"
+BASE_PACKAGES="snapserver avahi-daemon ssh python3 python3-pip git alsa-utils network-manager shairport-sync curl unzip nginx"
 if [ "$INSTALL_POTI" = true ]; then
   BASE_PACKAGES="$BASE_PACKAGES i2c-tools"
 fi
@@ -141,6 +158,7 @@ fi
 if [ "$INSTALL_SNAPWEB" = true ]; then
   install_snapweb
 fi
+install_hss_control
 
 mkdir -p "$SNAPSERVER_SYSTEMD_DROP_IN_DIR"
 cat > "$SNAPSERVER_SYSTEMD_OVERRIDE" <<'EOF'

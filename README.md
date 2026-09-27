@@ -45,13 +45,15 @@ The Go compiler includes a file watcher that monitors the source tree for modifi
 ├── setup.sh                # Helper script to install Go (via apt or official tarball)
 ├── shared/
 │   └── src/                 # Shared shell helpers used by Hub and Speaker
+├── hss-control/             # Zero-dependency Snapcast control PWA
 ├── hub/
 │   ├── dist/               # Compiled output scripts (e.g., hub_setup.sh)
 │   ├── enclosure/          # 3D printed enclosure files
 │   └── src/
 │       ├── main.sh         # Main execution entrypoint for the Hub
 │       ├── modules/        # Modular bash functions
-│       ├── scripts/        # Embedded Python tools (Wi-Fi portal, volume control)
+│       ├── scripts/        # Embedded tools (Wi-Fi portal, volume control, PWA updater)
+│       ├── config/          # Embedded web-server configuration
 │       └── services/       # Embedded systemd unit files
 └── speaker/
     ├── dist/               # Compiled output scripts (e.g., speaker_setup.sh)
@@ -111,6 +113,11 @@ Once compiled, transfer the resulting script from the `dist/` folder to your tar
 ```bash
 sudo bash hub/dist/hub_setup.sh
 ```
+
+The hub installer also installs HSS Control at `http://hss.local/control/`. It serves the
+mobile PWA through Nginx and proxies its WebSocket connection to Snapcast on port `1780`.
+The PWA archive is attached automatically by `.github/workflows/release-hss-control.yml`
+when a GitHub Release is published.
 
 The installer runs interactively by default, prompting for system hostnames, Wi-Fi credentials, and optional CPU performance tweaks. To run unattended deployments, pass the `-y` flag.
 
