@@ -170,7 +170,10 @@ RuntimeDirectory=snapserver
 RuntimeDirectoryMode=0775
 EOF
 systemctl daemon-reload
-echo "d /run/snapserver 0775 snapserver snapserver -" | sudo tee /etc/tmpfiles.d/snapserver.conf
+cat > /etc/tmpfiles.d/snapserver.conf <<'EOF'
+d /run/snapserver 0775 _snapserver _snapserver -
+EOF
+systemd-tmpfiles --create /etc/tmpfiles.d/snapserver.conf
 
 # 2. Configure Hostname
 echo "[2/7] Setting system hostname to '${NEW_HOSTNAME}'..."
@@ -305,9 +308,16 @@ else
   touch "$SNAPCONF"
 fi
 
-if grep -q "\[http\]" "$SNAPCONF"; then
-  # Nginx is the only HTTP listener; Snapcast remains the JSON-RPC backend.
-  sed -i "/\[http\]/,/\[/ s/^#*enabled =.*/enabled = false/" "$SNAPCONF"
+if grep -q "^[[:space:]]*\[http\][[:space:]]*$" "$SNAPCONF"; then
+  # Keep Snapcast's HTTP interface enabled so Snapweb remains available on port 1780.
+  if sed -n '/^[[:space:]]*\[http\][[:space:]]*$/,/^[[:space:]]*\[[^]]*\][[:space:]]*$/p' "$SNAPCONF" |
+    grep -q '^[[:space:]]*#*[[:space:]]*enabled[[:space:]]*='; then
+    sed -i "/^[[:space:]]*\[http\][[:space:]]*$/,/^[[:space:]]*\[[^]]*\][[:space:]]*$/ s/^[[:space:]]*#*[[:space:]]*enabled[[:space:]]*=.*/enabled = true/" "$SNAPCONF"
+  else
+    sed -i "/^[[:space:]]*\[http\][[:space:]]*$/a enabled = true" "$SNAPCONF"
+  fi
+else
+  printf '\n[http]\nenabled = true\n' >> "$SNAPCONF"
 fi
 
 # Replace the generated stream section instead of appending duplicate sources.
@@ -344,6 +354,9 @@ fi
   fi
 } >> "$SNAPCONF_BASE"
 mv "$SNAPCONF_BASE" "$SNAPCONF"
+
+# Snapserver persists stream state in server.json; rebuild it from the configuration.
+rm -f /var/lib/snapserver/server.json
 
 # 5. NetworkManager Hotspot Fallback & Provisioning Web Portal
 echo "[5/7] Setting up NetworkManager Hotspot and Wi-Fi provisioning portal..."
@@ -398,6 +411,7 @@ echo "[7/7] Enabling core services and finalizing installation..."
 systemctl daemon-reload
 systemctl enable --now shairport-sync
 systemctl enable --now snapserver.service
+systemctl restart snapserver.service
 if [ "$INSTALL_RASPOTIFY" = true ]; then
   systemctl enable --now raspotify.service
 fi
