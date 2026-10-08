@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""
+Optimized Volume Controller for Snapcast with GC9A01 Display & EC11 Encoder.
+Includes smooth state interpolation for fluid arc animations and dimming transitions.
+"""
+
 import json
 import queue
 import select
@@ -6,9 +11,12 @@ import signal
 import socket
 import threading
 import time
+from dataclasses import dataclass
+from typing import Any, Callable, Optional
 import spidev
 from PIL import Image, ImageDraw, ImageFont
 import RPi.GPIO as GPIO
+from gpiozero import RotaryEncoder, Button
 
 try:
     import numpy as np
@@ -28,27 +36,69 @@ ENCODER_SW = 22
 # ==============================================================================
 # ENCODER & ACCELERATION CONFIGURATION
 # ==============================================================================
-# Invert direction: Set to True if turning left makes it louder
 INVERT_DIRECTION = True
 
-# Acceleration Thresholds in seconds (lower delta_t means faster turning)
-# Increase these values to make fast-scrolling triggers wider/easier to reach.
-ACCEL_VERY_FAST_THRESHOLD = 0.015  # Default: 15ms
-ACCEL_FAST_THRESHOLD      = 0.035  # Default: 35ms
+ACCEL_VERY_FAST_THRESHOLD = 0.015  # 15ms
+ACCEL_FAST_THRESHOLD      = 0.035  # 35ms
 
-# Multipliers for acceleration steps
-ACCEL_VERY_FAST_STEP = 3.0  # Step size when spinning very fast
-ACCEL_FAST_STEP      = 2.0  # Step size when spinning fast
-ACCEL_NORMAL_STEP    = 1.0  # Step size for normal single detents
+ACCEL_VERY_FAST_STEP = 3.0
+ACCEL_FAST_STEP      = 2.0
+ACCEL_NORMAL_STEP    = 1.0
+
+# ==============================================================================
+# ANIMATION & SMOOTHING CONFIGURATION
+# ==============================================================================
+# Higher value = snappier response, Lower value = smoother floating transition
+VOLUME_LERP_FACTOR = 0.35
+BRIGHTNESS_LERP_FACTOR = 0.08
+TARGET_FPS = 60.0
+BACKLIGHT_PIN = 18
+BACKLIGHT_PWM_FREQUENCY = 1000
+IDLE_AFTER_S = 10.0
+SYNC_DELAY_S = 0.5
 # ==============================================================================
 
-class GC9A01Direct:
+
+@dataclass(frozen=True)
+class VolumeSnapshot:
+    """Immutable state snapshot shared by the worker threads."""
+
+    volume: float
+    muted: bool
+    last_activity: float
+
+
+class Backlight:
+    """Hardware PWM backlight with an idempotent resource lifecycle."""
+
+    def __init__(self, pin=BACKLIGHT_PIN, frequency_hz=BACKLIGHT_PWM_FREQUENCY):
+        self._pin = pin
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        GPIO.setup(self._pin, GPIO.OUT)
+        self._pwm = GPIO.PWM(self._pin, frequency_hz)
+        self._pwm.start(100.0)
+        self._last_percent = 100.0
+
+    def set_brightness(self, brightness):
+        percent = max(2.0, min(100.0, brightness * 100.0))
+        if abs(percent - self._last_percent) >= 0.1:
+            self._pwm.ChangeDutyCycle(percent)
+            self._last_percent = percent
+
+    def close(self):
+        self._pwm.stop()
+
+
+class GC9A01Display:
     """High-performance direct SPI driver for GC9A01 operating at 60MHz SPI clock."""
     def __init__(self, port=0, device=0, speed_hz=60000000, dc=DC_PIN, rst=RST_PIN):
         self.dc = dc
         self.rst = rst
         self.width = 240
         self.height = 240
+        self._pixel_buffer = bytearray(self.width * self.height * 2)
+        self._closed = False
 
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
@@ -91,101 +141,35 @@ class GC9A01Direct:
         time.sleep(0.12)
 
     def init_display(self):
-        self.send_command(0xEF)
-        self.send_command(0xEB)
-        self.send_data(0x14)
-        self.send_command(0xFE)
-        self.send_command(0xEF)
-        self.send_command(0xEB)
-        self.send_data(0x14)
-        self.send_command(0x84)
-        self.send_data(0x40)
-        self.send_command(0x85)
-        self.send_data(0xFF)
-        self.send_command(0x86)
-        self.send_data(0xFF)
-        self.send_command(0x87)
-        self.send_data(0xFF)
-        self.send_command(0x88)
-        self.send_data(0x0A)
-        self.send_command(0x89)
-        self.send_data(0x21)
-        self.send_command(0x8A)
-        self.send_data(0x00)
-        self.send_command(0x8B)
-        self.send_data(0x80)
-        self.send_command(0x8C)
-        self.send_data(0x01)
-        self.send_command(0x8D)
-        self.send_data(0x01)
-        self.send_command(0x8E)
-        self.send_data(0xFF)
-        self.send_command(0x8F)
-        self.send_data(0xFF)
-        self.send_command(0xB6)
-        self.send_data([0x00, 0x00])
-
-        self.send_command(0x36)
-        self.send_data(0x48)
-
-        self.send_command(0x3A)
-        self.send_data(0x05)
-        self.send_command(0x90)
-        self.send_data([0x08, 0x08, 0x08, 0x08])
-        self.send_command(0xBD)
-        self.send_data(0x06)
-        self.send_command(0xBC)
-        self.send_data(0x00)
-        self.send_command(0xFF)
-        self.send_data([0x60, 0x01, 0x04])
-        self.send_command(0xC3)
-        self.send_data(0x13)
-        self.send_command(0xC4)
-        self.send_data(0x13)
-        self.send_command(0xC9)
-        self.send_data(0x22)
-        self.send_command(0xBE)
-        self.send_data(0x11)
-        self.send_command(0xE1)
-        self.send_data([0x10, 0x0E])
-        self.send_command(0xDF)
-        self.send_data([0x21, 0x0C, 0x02])
-        self.send_command(0xF0)
-        self.send_data([0x45, 0x09, 0x08, 0x08, 0x26, 0x2A])
-        self.send_command(0xF1)
-        self.send_data([0x43, 0x70, 0x72, 0x36, 0x37, 0x6F])
-        self.send_command(0xF2)
-        self.send_data([0x45, 0x09, 0x08, 0x08, 0x26, 0x2A])
-        self.send_command(0xF3)
-        self.send_data([0x43, 0x70, 0x72, 0x36, 0x37, 0x6F])
-        self.send_command(0xED)
-        self.send_data([0x1B, 0x0B])
-        self.send_command(0xAE)
-        self.send_data(0x77)
-        self.send_command(0xCD)
-        self.send_data(0x63)
-        self.send_command(0x70)
-        self.send_data([0x07, 0x07, 0x04, 0x0E, 0x0F, 0x09, 0x07, 0x08, 0x03])
-        self.send_command(0xE8)
-        self.send_data(0x34)
-        self.send_command(0x62)
-        self.send_data([0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70])
-        self.send_command(0x63)
-        self.send_data([0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70])
-        self.send_command(0x64)
-        self.send_data([0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07])
-        self.send_command(0x66)
-        self.send_data([0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00])
-        self.send_command(0x67)
-        self.send_data([0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98])
-        self.send_command(0x74)
-        self.send_data([0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00])
-        self.send_command(0x98)
-        self.send_data([0x3E, 0x07])
-        self.send_command(0x35)
-        self.send_command(0x21)
-        self.send_command(0x11)
-        time.sleep(0.12)
+        for cmd, data in (
+            (0xEF, None), (0xEB, 0x14), (0xFE, None), (0xEF, None),
+            (0xEB, 0x14), (0x84, 0x40), (0x85, 0xFF), (0x86, 0xFF),
+            (0x87, 0xFF), (0x88, 0x0A), (0x89, 0x21), (0x8A, 0x00),
+            (0x8B, 0x80), (0x8C, 0x01), (0x8D, 0x01), (0x8E, 0xFF),
+            (0x8F, 0xFF), (0xB6, [0x00, 0x00]), (0x36, 0x48), (0x3A, 0x05),
+            (0x90, [0x08, 0x08, 0x08, 0x08]), (0xBD, 0x06), (0xBC, 0x00),
+            (0xFF, [0x60, 0x01, 0x04]), (0xC3, 0x13), (0xC4, 0x13),
+            (0xC9, 0x22), (0xBE, 0x11), (0xE1, [0x10, 0x0E]),
+            (0xDF, [0x21, 0x0C, 0x02]), (0xF0, [0x45, 0x09, 0x08, 0x08, 0x26, 0x2A]),
+            (0xF1, [0x43, 0x70, 0x72, 0x36, 0x37, 0x6F]),
+            (0xF2, [0x45, 0x09, 0x08, 0x08, 0x26, 0x2A]),
+            (0xF3, [0x43, 0x70, 0x72, 0x36, 0x37, 0x6F]),
+            (0xED, [0x1B, 0x0B]), (0xAE, 0x77), (0xCD, 0x63),
+            (0x70, [0x07, 0x07, 0x04, 0x0E, 0x0F, 0x09, 0x07, 0x08, 0x03]),
+            (0xE8, 0x34),
+            (0x62, [0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70]),
+            (0x63, [0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70]),
+            (0x64, [0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07]),
+            (0x66, [0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00]),
+            (0x67, [0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98]),
+            (0x74, [0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00]),
+            (0x98, [0x3E, 0x07]), (0x35, None), (0x21, None), (0x11, None)
+        ):
+            self.send_command(cmd)
+            if data is not None:
+                self.send_data(data)
+            if cmd == 0x11:
+                time.sleep(0.12)
         self.send_command(0x29)
         time.sleep(0.02)
 
@@ -200,7 +184,9 @@ class GC9A01Direct:
         self.set_window(0, 0, self.width - 1, self.height - 1)
 
         if HAS_NUMPY:
-            img_arr = np.frombuffer(image.tobytes(), dtype=np.uint8).reshape((self.height, self.width, 3))
+            img_arr = np.frombuffer(
+                image.tobytes(), dtype=np.uint8
+            ).reshape((self.height, self.width, 3))
 
             if brightness < 0.99:
                 b_scale = int(max(0.02, brightness) * 256)
@@ -211,10 +197,9 @@ class GC9A01Direct:
             b = img_arr[:, :, 2].astype(np.uint16) >> 3
             rgb565 = r | g | b
 
-            buf = np.empty((self.height, self.width, 2), dtype=np.uint8)
-            buf[:, :, 0] = (rgb565 >> 8) & 0xFF
-            buf[:, :, 1] = rgb565 & 0xFF
-            raw_bytes = buf.tobytes()
+            self._pixel_buffer[0::2] = ((rgb565 >> 8) & 0xFF).astype(np.uint8).tobytes()
+            self._pixel_buffer[1::2] = (rgb565 & 0xFF).astype(np.uint8).tobytes()
+            raw_bytes = self._pixel_buffer
         else:
             raw = image.convert("RGB").tobytes()
             buffer = bytearray(self.width * self.height * 2)
@@ -228,7 +213,8 @@ class GC9A01Direct:
                 buffer[buf_idx] = (rgb565 >> 8) & 0xFF
                 buffer[buf_idx + 1] = rgb565 & 0xFF
                 buf_idx += 2
-            raw_bytes = bytes(buffer)
+            self._pixel_buffer[:] = buffer
+            raw_bytes = self._pixel_buffer
 
         GPIO.output(self.dc, GPIO.HIGH)
         chunk_size = 8192
@@ -242,16 +228,20 @@ class GC9A01Direct:
                 self.spi.writebytes(list(chunk))
 
     def close(self):
-        """Close the SPI device without touching GPIO shared by the application."""
-        self.spi.close()
+        if not self._closed:
+            self.spi.close()
+            self._closed = True
 
-class SnapcastController:
+
+class SnapcastRPCClient:
     """Single-worker Snapcast client with coalesced writes and idle polling."""
     IDLE_AFTER_S = 10.0
     STATUS_INTERVAL_S = 5.0
     RPC_TIMEOUT_S = 0.5
 
-    def __init__(self, host="127.0.0.1", port=1705):
+    def __init__(self, state: "VolumeState", host: str = "127.0.0.1",
+                 port: int = 1705):
+        self.state = state
         self.host = host
         self.port = port
         self.connected = False
@@ -262,7 +252,7 @@ class SnapcastController:
         self._worker = threading.Thread(target=self._run, name="snapcast-rpc")
         self._worker.start()
 
-    def _send_rpc(self, method, params=None):
+    def _send_rpc(self, method: str, params: Optional[dict] = None) -> Optional[dict]:
         if self._stop_event.is_set():
             return None
 
@@ -311,23 +301,30 @@ class SnapcastController:
         return None
 
     @staticmethod
-    def _status_values(response):
-        """Return discovered clients and the first client's volume settings."""
+    def _status_values(response: Any):
+        """Return discovered clients and the first active client's volume."""
+        if not isinstance(response, dict):
+            return (), None
         groups = response.get("result", {}).get("server", {}).get("groups", [])
+        if not isinstance(groups, list):
+            return (), None
         discovered_ids = tuple(
             client_id
             for group in groups
             for client in group.get("clients", [])
             if (client_id := client.get("id"))
         )
-        if not groups or not groups[0].get("clients"):
+        clients = [client for group in groups for client in group.get("clients", [])]
+        if not clients:
             return discovered_ids, None
 
-        volume = groups[0]["clients"][0].get("config", {}).get("volume", {})
-        return discovered_ids, (
-            float(volume.get("percent", 50)),
-            bool(volume.get("muted", False)),
-        )
+        volume = clients[0].get("config", {}).get("volume", {})
+        try:
+            percentage = float(volume.get("percent", 50.0))
+        except (TypeError, ValueError):
+            percentage = 50.0
+        return discovered_ids, (max(0.0, min(100.0, percentage)),
+                                bool(volume.get("muted", False)))
 
     def _apply_status(self, response, force=False):
         client_ids, remote_state = self._status_values(response)
@@ -338,11 +335,11 @@ class SnapcastController:
             return
 
         if force:
-            app_state.set_from_snapcast(*remote_state)
+            self.state.set_from_snapcast(*remote_state)
             return
 
         remote_volume, remote_muted = remote_state
-        app_state.set_from_snapcast_if_idle(
+        self.state.set_from_snapcast_if_idle(
             remote_volume,
             remote_muted,
             self.IDLE_AFTER_S,
@@ -356,8 +353,8 @@ class SnapcastController:
 
     def _poll_if_idle(self):
         now = time.monotonic()
-        _, last_activity, _ = app_state.snapshot()
-        if now - last_activity < self.IDLE_AFTER_S:
+        snapshot = self.state.snapshot()
+        if now - snapshot.last_activity < self.IDLE_AFTER_S:
             return False
 
         response = self._send_rpc("Server.GetStatus")
@@ -367,7 +364,6 @@ class SnapcastController:
         return True
 
     def push_volume(self, target_vol, muted):
-        """Queue the newest volume and mute state, discarding stale values."""
         update = (float(target_vol), bool(muted))
         try:
             self._volume_queue.put_nowait(update)
@@ -417,92 +413,72 @@ class SnapcastController:
             pass
         self._worker.join(timeout=1.5)
 
+
 class EC11DebouncedEncoder:
-    """Robust EC11 Encoder state machine with strict time-based lockout debounce."""
-    OUTCOME = (
-         0,  1, -1,  0,
-        -1,  0,  0,  1,
-         1,  0,  0, -1,
-         0, -1,  1,  0
-    )
+    """Robust EC11 encoder using gpiozero with time-based acceleration."""
     def __init__(
         self,
-        gpio_a,
-        gpio_b,
-        gpio_sw,
-        callback,
-        button_callback,
-        debounce_time_s=0.030,
+        gpio_a: int,
+        gpio_b: int,
+        gpio_sw: int,
+        callback: Callable[[float], None],
+        button_callback: Callable[..., None],
+        debounce_time_s: float = 0.030,
     ):
         self.gpio_a = gpio_a
         self.gpio_b = gpio_b
         self.gpio_sw = gpio_sw
         self.callback = callback
         self.button_callback = button_callback
-        self.debounce_time_s = debounce_time_s  # Minimum time between valid steps (35ms default)
+        self.debounce_time_s = debounce_time_s
 
-        GPIO.setup(self.gpio_a, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(self.gpio_b, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(self.gpio_sw, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-        self.last_state = (GPIO.input(self.gpio_a) << 1) | GPIO.input(self.gpio_b)
+        self.encoder = RotaryEncoder(
+            a=self.gpio_a,
+            b=self.gpio_b,
+            max_steps=0,
+        )
+        self.button = Button(
+            self.gpio_sw,
+            pull_up=True,
+            bounce_time=0.2,
+        )
+        self.last_encoder_steps = self.encoder.steps
         self.last_step_time = time.monotonic()
-        self.step_accumulator = 0
         self._state_lock = threading.Lock()
 
-        GPIO.add_event_detect(self.gpio_a, GPIO.BOTH, callback=self._handle_edge)
-        GPIO.add_event_detect(self.gpio_b, GPIO.BOTH, callback=self._handle_edge)
-        GPIO.add_event_detect(
-            self.gpio_sw,
-            GPIO.FALLING,
-            callback=self._handle_button,
-            bouncetime=200,
-        )
+        self.encoder.when_rotated = self._handle_rotation
+        self.button.when_pressed = self.button_callback
 
-    def _handle_edge(self, channel):
+    def _handle_rotation(self):
         now = time.monotonic()
-        a_val = GPIO.input(self.gpio_a)
-        b_val = GPIO.input(self.gpio_b)
-        current_state = (a_val << 1) | b_val
+        current_steps = self.encoder.steps
 
         with self._state_lock:
-            if current_state == self.last_state:
+            step_delta = current_steps - self.last_encoder_steps
+            self.last_encoder_steps = current_steps
+            if step_delta == 0:
                 return
 
-            idx = (self.last_state << 2) | current_state
-            self.last_state = current_state
-            direction = self.OUTCOME[idx]
+            direction = 1 if step_delta > 0 else -1
             if INVERT_DIRECTION:
                 direction = -direction
-            if direction == 0:
-                return
-
-            self.step_accumulator += direction
-            if abs(self.step_accumulator) < 2:
-                return
 
             delta_t = now - self.last_step_time
             if delta_t < self.debounce_time_s:
-                self.step_accumulator = 0
                 return
 
             self.last_step_time = now
             step_size = (ACCEL_VERY_FAST_STEP if delta_t < ACCEL_VERY_FAST_THRESHOLD else
                          ACCEL_FAST_STEP if delta_t < ACCEL_FAST_THRESHOLD else
                          ACCEL_NORMAL_STEP)
-            step = step_size if self.step_accumulator > 0 else -step_size
-            self.step_accumulator = 0
+            step = step_size if direction > 0 else -step_size
 
-        # Never perform network, display, or other blocking work under the lock.
         self.callback(step)
 
-    def _handle_button(self, channel):
-        self.button_callback()
-
     def close(self):
-        GPIO.remove_event_detect(self.gpio_a)
-        GPIO.remove_event_detect(self.gpio_b)
-        GPIO.remove_event_detect(self.gpio_sw)
+        self.encoder.close()
+        self.button.close()
+
 
 def get_volume_color(pct):
     pct = max(0.0, min(100.0, pct))
@@ -525,6 +501,7 @@ def get_volume_color(pct):
 
     return (r, g, b)
 
+
 def build_gradient_base_image():
     img = Image.new("RGB", (240, 240), (10, 14, 24))
     draw = ImageDraw.Draw(img)
@@ -537,6 +514,7 @@ def build_gradient_base_image():
         draw.arc(ring_box, start=deg, end=deg + 3, fill=slice_color, width=ring_width)
 
     return img
+
 
 def load_font(size, bold=False):
     try:
@@ -557,7 +535,18 @@ def load_font(size, bold=False):
 
     return ImageFont.load_default()
 
+
+# Pre-render background elements
+base_gradient_img = build_gradient_base_image()
+font_large = load_font(84, bold=True)
+ring_box = [14, 14, 226, 226]
+ring_width = 14
+track_color = (28, 38, 58)
+muted_ring_color = (90, 15, 15)
+
+
 def render_frame(volume_pct, muted=False):
+    """Render a full UI frame using precise floating point volume values for smooth arc motion."""
     image = base_gradient_img.copy()
     draw = ImageDraw.Draw(image)
 
@@ -569,6 +558,7 @@ def render_frame(volume_pct, muted=False):
             unfilled_start = -90 + fill_angle
             draw.arc(ring_box, start=unfilled_start, end=270, fill=track_color, width=ring_width)
 
+    # Convert volume to display integer string
     vol_str = f"{int(round(volume_pct))}"
     bbox_vol = draw.textbbox((0, 0), vol_str, font=font_large)
     vw = bbox_vol[2] - bbox_vol[0]
@@ -576,12 +566,11 @@ def render_frame(volume_pct, muted=False):
 
     x_pos = (240 - vw) // 2 - bbox_vol[0]
     if muted:
-        # Keep the digit's ink centered on y=80, leaving a clear gap above
-        # the separately positioned speaker pictogram.
         volume_center_y = 80
         y_pos = volume_center_y - (bbox_vol[1] + bbox_vol[3]) // 2
     else:
         y_pos = (240 - vh) // 2 - bbox_vol[1]
+
     volume_color = (60, 68, 80) if muted else (255, 255, 255)
     draw.text((x_pos, y_pos), vol_str, fill=volume_color, font=font_large)
 
@@ -612,24 +601,17 @@ def render_frame(volume_pct, muted=False):
 
     return image
 
-# Pre-render background elements
-base_gradient_img = build_gradient_base_image()
-font_large = load_font(84, bold=True)
-ring_box = [14, 14, 226, 226]
-ring_width = 14
-track_color = (28, 38, 58)
-muted_ring_color = (90, 15, 15)
 
 class VolumeState:
-    """Small synchronized state container shared by GPIO, RPC, and main threads."""
-    def __init__(self, volume=50.0):
-        self._volume = volume
+    """Thread-safe synchronized container managing target state and user activity."""
+    def __init__(self, volume: float = 50.0):
+        self._volume = max(0.0, min(100.0, float(volume)))
         self._muted = False
         self._last_activity = time.monotonic()
         self._pending_sync = False
         self._lock = threading.Lock()
 
-    def on_encoder_step(self, step):
+    def on_encoder_step(self, step: float) -> None:
         now = time.monotonic()
         with self._lock:
             self._muted = False
@@ -637,7 +619,7 @@ class VolumeState:
             self._last_activity = now
             self._pending_sync = True
 
-    def toggle_mute(self, _event=None):
+    def toggle_mute(self, _event=None) -> bool:
         now = time.monotonic()
         with self._lock:
             self._muted = not self._muted
@@ -645,13 +627,14 @@ class VolumeState:
             self._pending_sync = True
             return self._muted
 
-    def set_from_snapcast(self, volume, muted):
+    def set_from_snapcast(self, volume: float, muted: bool) -> None:
         with self._lock:
             self._volume = max(0.0, min(100.0, volume))
             self._muted = bool(muted)
 
-    def set_from_snapcast_if_idle(self, volume, muted, idle_after_s):
-        """Apply remote state only if no local interaction occurred recently."""
+    def set_from_snapcast_if_idle(
+        self, volume: float, muted: bool, idle_after_s: float
+    ) -> bool:
         now = time.monotonic()
         with self._lock:
             if now - self._last_activity < idle_after_s:
@@ -665,11 +648,13 @@ class VolumeState:
                 self._muted = muted
             return changed
 
-    def snapshot(self):
+    def snapshot(self) -> VolumeSnapshot:
         with self._lock:
-            return self._volume, self._last_activity, self._muted
+            return VolumeSnapshot(self._volume, self._muted, self._last_activity)
 
-    def take_pending_sync(self, now, delay_s):
+    def take_pending_sync(
+        self, now: float, delay_s: float
+    ) -> Optional[tuple[float, bool]]:
         with self._lock:
             if self._pending_sync and now - self._last_activity >= delay_s:
                 self._pending_sync = False
@@ -679,6 +664,7 @@ class VolumeState:
 
 app_state = VolumeState()
 driver = None
+backlight = None
 snap_controller = None
 encoder = None
 shutdown_event = threading.Event()
@@ -688,14 +674,77 @@ def request_shutdown(signum, frame):
     shutdown_event.set()
 
 
+def render_loop():
+    """
+    High-performance render loop applying linear interpolation (lerp) for smooth 60 FPS
+    volume animations and dimming transitions.
+    """
+    displayed_volume = 50.0
+    displayed_brightness = 1.0
+
+    last_rendered_volume = -1.0
+    last_rendered_muted = None
+    last_rendered_brightness = -1.0
+
+    # Initial state sync
+    snapshot = app_state.snapshot()
+    displayed_volume = snapshot.volume
+
+    while not shutdown_event.is_set():
+        now = time.monotonic()
+        snapshot = app_state.snapshot()
+        target_vol = snapshot.volume
+        last_activity = snapshot.last_activity
+        muted = snapshot.muted
+
+        # Calculate target brightness based on inactivity (10 seconds timeout)
+        target_brightness = 0.15 if (now - last_activity > 10.0) else 1.0
+
+        # Smooth volume interpolation
+        vol_diff = target_vol - displayed_volume
+        if abs(vol_diff) > 0.01:
+            displayed_volume += vol_diff * VOLUME_LERP_FACTOR
+        else:
+            displayed_volume = target_vol
+
+        # Smooth brightness interpolation
+        bright_diff = target_brightness - displayed_brightness
+        if abs(bright_diff) > 0.001:
+            displayed_brightness += bright_diff * BRIGHTNESS_LERP_FACTOR
+        else:
+            displayed_brightness = target_brightness
+
+        # Check if active animation is in progress
+        is_animating = (displayed_volume != target_vol) or (displayed_brightness != target_brightness)
+
+        # Detect visual changes requiring display updates
+        mute_changed = (muted != last_rendered_muted)
+        vol_changed = (abs(displayed_volume - last_rendered_volume) > 0.02)
+        bright_changed = (abs(displayed_brightness - last_rendered_brightness) > 0.005)
+
+        if mute_changed or vol_changed or bright_changed:
+            image = render_frame(displayed_volume, muted=muted)
+            driver.display(image)
+            backlight.set_brightness(displayed_brightness)
+
+            last_rendered_volume = displayed_volume
+            last_rendered_muted = muted
+            last_rendered_brightness = displayed_brightness
+
+        # Adaptive refresh rate: 60 FPS during smooth animations, 20 FPS when idle
+        sleep_interval = (1.0 / TARGET_FPS) if is_animating else 0.05
+        shutdown_event.wait(sleep_interval)
+
+
 def run():
-    global driver, snap_controller, encoder
+    global driver, backlight, snap_controller, encoder
     signal.signal(signal.SIGINT, request_shutdown)
     signal.signal(signal.SIGTERM, request_shutdown)
 
     try:
-        driver = GC9A01Direct(port=0, device=0, speed_hz=60000000)
-        snap_controller = SnapcastController()
+        driver = GC9A01Display(port=0, device=0, speed_hz=60000000)
+        backlight = Backlight()
+        snap_controller = SnapcastRPCClient(app_state)
         encoder = EC11DebouncedEncoder(
             ENCODER_A,
             ENCODER_B,
@@ -704,38 +753,29 @@ def run():
             app_state.toggle_mute,
         )
 
-        last_rendered_volume = -1.0
-        last_rendered_muted = None
-        last_rendered_brightness = -1.0
-        print("Debounced & Configurable Volume Control running...")
+        render_thread = threading.Thread(target=render_loop, name="display-render")
+        render_thread.start()
+        print("Smooth Animated Volume Control Service running...")
 
         while not shutdown_event.is_set():
             now = time.monotonic()
-            volume, last_activity, muted = app_state.snapshot()
 
-            pending_update = app_state.take_pending_sync(now, 0.5)
+            pending_update = app_state.take_pending_sync(now, SYNC_DELAY_S)
             if pending_update is not None:
                 pending_volume, pending_muted = pending_update
                 snap_controller.push_volume(pending_volume, pending_muted)
 
-            target_brightness = 0.15 if now - last_activity > 10.0 else 1.0
-            mute_changed = muted != last_rendered_muted
-            vol_changed = abs(volume - last_rendered_volume) > 0.1
-            bright_changed = abs(target_brightness - last_rendered_brightness) > 0.01
-
-            if vol_changed or mute_changed or bright_changed:
-                image = render_frame(volume, muted=muted)
-                driver.display(image, brightness=target_brightness)
-                last_rendered_volume = volume
-                last_rendered_muted = muted
-                last_rendered_brightness = target_brightness
-
-            shutdown_event.wait(0.016)
+            shutdown_event.wait(0.05)
     finally:
+        shutdown_event.set()
+        if 'render_thread' in locals():
+            render_thread.join(timeout=2.0)
         if encoder is not None:
             encoder.close()
         if snap_controller is not None:
             snap_controller.close()
+        if backlight is not None:
+            backlight.close()
         if driver is not None:
             driver.close()
         GPIO.cleanup()

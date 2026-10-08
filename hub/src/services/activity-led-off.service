@@ -1,0 +1,11 @@
+[Unit]
+Description=Disable Raspberry Pi activity LEDs to reduce power use
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for LED in /sys/class/leds/*act* /sys/class/leds/*ACT*; do [ -e "$LED/trigger" ] && printf none > "$LED/trigger" 2>/dev/null || true; [ -e "$LED/brightness" ] && printf 0 > "$LED/brightness" 2>/dev/null || true; done'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

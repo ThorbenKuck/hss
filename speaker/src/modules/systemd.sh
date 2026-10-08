@@ -1,4 +1,1 @@
-reload_and_enable() {
-  systemctl daemon-reload
-  systemctl enable "$1"
-}
+# Systemd helpers are shared by both setup targets in shared/src/systemd.sh.

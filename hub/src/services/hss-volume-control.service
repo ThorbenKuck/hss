@@ -6,6 +6,7 @@ Conflicts=hss-boot-animation.service
 
 [Service]
 Type=simple
+User=root
 ExecStart=/opt/hss_display_venv/bin/python /opt/hss_volume_control.py
 WorkingDirectory=/opt
 Restart=always

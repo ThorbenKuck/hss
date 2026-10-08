@@ -3,33 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101827">
+  <meta name="theme-color" content="#0f172a">
   <meta name="description" content="HSS Snapcast control">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="modern.css">
   <title>HSS Control</title>
 </head>
 <body>
   <header class="app-header">
-    <div><p class="eyebrow">HSS</p><h1>Control</h1></div>
-    <span id="connection" class="status offline">Offline</span>
+    <div class="brand"><p class="eyebrow">HSS</p><h1>Control</h1></div>
+    <div class="header-actions"><span id="connection" class="status offline">Offline</span><button id="refresh" class="icon-button" aria-label="Reconnect">↻</button><small id="last-refresh" class="last-refresh">Noch nicht geladen</small></div>
   </header>
-  <main>
-    <section class="panel">
-      <div class="section-title"><h2>Clients</h2><button id="refresh" class="icon-button" aria-label="Reconnect">↻</button></div>
-      <div id="clients" class="stack"><p class="empty">Waiting for Snapcast…</p></div>
+  <main class="shell">
+    <section id="zones" class="view active" aria-labelledby="zones-tab">
+      <div class="view-heading"><div><p class="eyebrow">Room control</p><h2>Your zones</h2></div></div>
+      <p class="hint">Drag a speaker between zones, or create a new zone by dropping it below.</p>
+      <div id="groups" class="zone-grid"><p class="empty">Waiting for Snapcast…</p></div>
+      <div id="new-zone-drop" class="new-zone-drop" data-new-zone-drop="true"><span>＋</span><strong>Neue Zone erstellen</strong><small>Speaker hierher ziehen</small></div>
     </section>
-    <section class="panel">
-      <div class="section-title"><h2>Groups</h2><button id="new-group" class="button">New group</button></div>
-      <div id="groups" class="stack"></div>
-    </section>
-    <section class="panel">
-      <div class="section-title"><h2>Streams</h2><button id="new-stream" class="button">New stream</button></div>
-      <div id="streams" class="stack"></div>
+    <section id="streams" class="view" aria-labelledby="streams-tab" hidden>
+      <div class="view-heading"><div><p class="eyebrow">Audio sources</p><h2>Streams</h2></div></div>
+      <p class="hint">Streams are configured on the Snapserver. Add PCM or pipe streams in <code>/etc/snapserver.conf</code>, then reconnect.</p>
+      <div id="stream-list" class="stream-list"><p class="empty">No streams configured.</p></div>
     </section>
   </main>
-  <template id="client-template"><article class="card client-card"><div class="card-heading"><div><strong class="client-name"></strong><small class="client-id"></small></div><span class="client-status"></span></div><label class="volume-label">Volume <output class="volume-value"></output><input class="volume" type="range" min="0" max="100" step="1"></label><button class="mute button secondary"></button></article></template>
+  <nav class="tabs bottom-nav" aria-label="Main navigation">
+    <button class="tab active" data-tab="zones"><span aria-hidden="true">⌂</span>Zones &amp; Control</button>
+    <button class="tab" data-tab="streams"><span aria-hidden="true">♫</span>Streams</button>
+  </nav>
+  <dialog id="speaker-dialog" class="speaker-dialog">
+    <form method="dialog" id="speaker-form">
+      <div class="dialog-heading"><div><p class="eyebrow">Speaker details</p><h2 id="speaker-title">Speaker</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <label class="form-field">Alias / Friendly name<input id="speaker-alias" type="text" maxlength="80" autocomplete="off"></label>
+      <dl id="speaker-details" class="speaker-details"></dl>
+      <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button" id="save-speaker" value="default">Save alias</button></div>
+    </form>
+  </dialog>
+  <dialog id="move-dialog" class="speaker-dialog move-dialog">
+    <form method="dialog" id="move-form">
+      <div class="dialog-heading"><div><p class="eyebrow">Speaker action</p><h2>Move speaker</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <p id="move-title" class="modal-copy"></p>
+      <label class="form-field">Destination<select id="move-target"></select></label>
+      <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button" id="move-speaker" value="default">Move speaker</button></div>
+    </form>
+  </dialog>
   <script src="app.js"></script>
 </body>
 </html>
